@@ -157,14 +157,25 @@ jobs:
 
       - name: Build Tauri app
         run: npm run tauri build -- --target ${{ matrix.target }}
+        
+      - name: Rename macOS artifacts
+        run: |
+          cd src-tauri/target/${{ matrix.target }}/release/bundle/macos/
+          for f in *.app.tar.gz; do
+            mv "$f" "${f%.app.tar.gz}-${{ matrix.arch }}.app.tar.gz"
+          done
+          for f in *.app.tar.gz.sig; do
+            mv "$f" "${f%.app.tar.gz.sig}-${{ matrix.arch }}.app.tar.gz.sig"
+          done
+
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: nps-studio-macos-${{ matrix.arch }}
-          path: |
-            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz
-            src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.sig
+            path: |
+              src-tauri/target/${{ matrix.target }}/release/bundle/macos/*-${{ matrix.arch }}.app.tar.gz
+              src-tauri/target/${{ matrix.target }}/release/bundle/macos/*-${{ matrix.arch }}.app.tar.gz.sig
           if-no-files-found: ignore
 
   create-release:
