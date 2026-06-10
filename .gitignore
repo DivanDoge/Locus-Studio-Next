@@ -1,0 +1,31 @@
+# Node / frontend
+node_modules/
+dist/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Python / local tooling
+.venv/
+venv/
+
+# Tauri / Rust build outputs
+src-tauri/target/
+src-tauri/bundle/
+release-artifacts/
+
+# Tauri signer / secrets
+.tauri/
+*.key
+*.key.pub
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
