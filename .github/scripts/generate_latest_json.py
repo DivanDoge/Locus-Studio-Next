@@ -28,10 +28,10 @@ def main() -> None:
     version = tag.lstrip("v")
     pub_date = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
-    windows_exe = find_path(release_dir, "x86_64-pc-windows-msvc", "/bundle/nsis/")
-    linux_appimage = find_path(release_dir, "/bundle/appimage/", ".AppImage")
-    mac_aarch64 = find_path(release_dir, "aarch64-apple-darwin", "/bundle/macos/", ".app.tar.gz")
-    mac_x86_64 = find_path(release_dir, "x86_64-apple-darwin", "/bundle/macos/", ".app.tar.gz")
+    windows_exe = find_path(release_dir, "nps-studio-windows", ".exe")
+    linux_appimage = find_path(release_dir, "nps-studio-linux", ".AppImage")
+    mac_aarch64 = find_path(release_dir, "nps-studio-macos-aarch64", ".app.tar.gz")
+    mac_x86_64 = find_path(release_dir, "nps-studio-macos-x86_64", ".app.tar.gz")
 
     payload = {
         "version": version,
