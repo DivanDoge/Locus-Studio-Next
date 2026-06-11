@@ -349,65 +349,88 @@ fn build_entries_from_nps(nps_path: &Path) -> Result<Vec<Entry>> {
 
 fn apply_translations_to_nps(source_path: &Path, entries: &[Entry], out_path: &Path) -> Result<()> {
     let content = fs::read_to_string(source_path)?;
-    let mut iter = entries.iter();
-    let mut current = iter.next();
+    
+    let mut sorted_entries: Vec<&Entry> = entries.iter().collect();
+    sorted_entries.sort_by_key(|e| (e.line_no, e.id));
+
+    let mut entry_iter = sorted_entries.into_iter().peekable();
     let mut out: Vec<String> = Vec::new();
 
-    for line in content.lines() {
-        if current.is_none() {
+    for (idx, line) in content.lines().enumerate() {
+        let line_no = idx + 1;
+
+        let mut line_entries: Vec<&Entry> = Vec::new();
+        while entry_iter.peek().map(|e| e.line_no == line_no).unwrap_or(false) {
+            line_entries.push(entry_iter.next().unwrap());
+        }
+
+        if line_entries.is_empty() {
             out.push(line.to_string());
-            continue;
+        } else {
+            out.push(apply_entries_to_line(line, &line_entries));
         }
-
-        let mut rewritten = line.to_string();
-
-        if let Some((_, head, _, tail)) = split_voice_line(line) {
-            if let Some(cur) = current {
-                if cur.r#type == EntryType::Voice {
-                    let text = if cur.translation.trim().is_empty() {
-                        cur.original.clone()
-                    } else {
-                        cur.translation.clone()
-                    };
-                    rewritten = format!("{}{}{}", head, text, tail);
-                    current = iter.next();
-                }
-            }
-        } else if let Some((pre, tag, old_text)) = split_choice_line(line) {
-            if let Some(cur) = current {
-                if cur.r#type == EntryType::Choice {
-                    let text = if cur.translation.trim().is_empty() {
-                        old_text
-                    } else {
-                        cur.translation.clone()
-                    };
-                    let replaced = Regex::new(r#"TEXT="[^"]*""#)
-                        .unwrap()
-                        .replace(&tag, format!(r#"TEXT="{}""#, text))
-                        .to_string();
-                    rewritten = format!("{}{}", pre, replaced);
-                    current = iter.next();
-                }
-            }
-        } else if let Some((head_ws, _, tail)) = split_narration_line(line) {
-            if let Some(cur) = current {
-                if cur.r#type == EntryType::Narration {
-                    let text = if cur.translation.trim().is_empty() {
-                        cur.original.clone()
-                    } else {
-                        cur.translation.clone()
-                    };
-                    rewritten = format!("{}{}{}", head_ws, text, tail);
-                    current = iter.next();
-                }
-            }
-        }
-
-        out.push(rewritten);
     }
 
     fs::write(out_path, out.join("\n"))?;
     Ok(())
+}
+
+fn apply_entries_to_line(line: &str, entries: &[&Entry]) -> String {
+    let segments = split_line_by_voice_tags(line);
+    let mut voice_entries: Vec<&Entry> = entries.iter()
+        .filter(|e| e.r#type == EntryType::Voice)
+        .copied()
+        .collect();
+    // сортуємо по id щоб відповідали порядку сегментів
+    voice_entries.sort_by_key(|e| e.id);
+    
+    let mut voice_iter = voice_entries.into_iter();
+    let mut out_segments: Vec<String> = Vec::new();
+
+    for segment in &segments {
+        if let Some((_, head, _, tail)) = split_voice_line(segment) {
+            if let Some(entry) = voice_iter.next() {
+                let text = if entry.translation.trim().is_empty() {
+                    entry.original.clone()
+                } else {
+                    entry.translation.clone()
+                };
+                out_segments.push(format!("{}{}{}", head, text, tail));
+            } else {
+                out_segments.push(segment.clone());
+            }
+        } else {
+            // нарація або choice — обробляємо як раніше
+            let mut seg = segment.clone();
+            for entry in entries {
+                let text = if entry.translation.trim().is_empty() {
+                    entry.original.clone()
+                } else {
+                    entry.translation.clone()
+                };
+                match entry.r#type {
+                    EntryType::Narration => {
+                        if let Some((head_ws, _, tail)) = split_narration_line(&seg) {
+                            seg = format!("{}{}{}", head_ws, text, tail);
+                        }
+                    }
+                    EntryType::Choice => {
+                        if let Some((pre, tag, _)) = split_choice_line(&seg) {
+                            let replaced = Regex::new(r#"TEXT="[^"]*""#)
+                                .unwrap()
+                                .replace(&tag, format!(r#"TEXT="{}""#, text))
+                                .to_string();
+                            seg = format!("{}{}", pre, replaced);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            out_segments.push(seg);
+        }
+    }
+
+    out_segments.join("")
 }
 
 fn import_from_nps(path: &Path, original_entries: &[Entry], overwrite: bool) -> Result<ImportResult> {
