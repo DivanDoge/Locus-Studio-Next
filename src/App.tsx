@@ -1217,15 +1217,9 @@ function App() {
     setReviewMode(true);
   }
 
-  function applyReviewChanges() {
-    const changed = Object.entries(reviewDrafts).filter(([id, val]) => {
-      const entry = entries.find((e) => e.id === Number(id));
-      return entry && entry.translation !== val;
-    }).length;
-    setEntries((prev) => prev.map((e) => ({ ...e, translation: reviewDrafts[e.id] ?? e.translation })));
-    setReviewMode(false);
-    setReviewDrafts({});
-    setStatus(`Review applied: ${changed} change${changed !== 1 ? "s" : ""}`);
+  function updateCurrentTranslation(next: string) {
+    if (currentId === null) return;
+    setEntries((prev) => prev.map((e) => (e.id === currentId ? { ...e, translation: next } : e)));
   }
 
   function discardReview() {

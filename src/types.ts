@@ -4,6 +4,8 @@ export interface Entry {
   id: number;
   type: EntryType;
   line_no: number;
+  line_count?: number;
+  tail_tags?: string;
   speaker: string;
   original: string;
   translation: string;

@@ -23,6 +23,10 @@ struct Entry {
     id: usize,
     r#type: EntryType,
     line_no: usize,
+    #[serde(default = "default_line_count")]
+    line_count: usize,
+    #[serde(default)]
+    tail_tags: String,
     speaker: String,
     original: String,
     translation: String,
@@ -30,6 +34,10 @@ struct Entry {
     approved: bool,
     #[serde(default)]
     src: String,
+}
+
+fn default_line_count() -> usize {
+    1
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -270,6 +278,8 @@ fn build_entries_from_nps(nps_path: &Path) -> Result<Vec<Entry>> {
                         id: entries.len(),
                         r#type: EntryType::Voice,
                         line_no,
+                        line_count: 1,
+                        tail_tags: String::new(),
                         speaker,
                         original: text,
                         translation: String::new(),
@@ -296,6 +306,8 @@ fn build_entries_from_nps(nps_path: &Path) -> Result<Vec<Entry>> {
                         id: entries.len(),
                         r#type: EntryType::Choice,
                         line_no,
+                        line_count: 1,
+                        tail_tags: String::new(),
                         speaker: "CHOICE".to_string(),
                         original: text,
                         translation: String::new(),
@@ -315,6 +327,8 @@ fn build_entries_from_nps(nps_path: &Path) -> Result<Vec<Entry>> {
                             .collect::<Vec<&str>>()
                             .join(" ");
                         entries[idx].original = merged;
+                        entries[idx].line_count += 1;
+                        entries[idx].tail_tags = tail_tags.clone();
                         if tail_tags.is_empty() {
                             pending_voice_line_no = line_no;
                         } else {
@@ -334,6 +348,8 @@ fn build_entries_from_nps(nps_path: &Path) -> Result<Vec<Entry>> {
                         id: entries.len(),
                         r#type: EntryType::Narration,
                         line_no,
+                        line_count: 1,
+                        tail_tags: String::new(),
                         speaker: String::new(),
                         original: text,
                         translation: String::new(),
@@ -349,19 +365,32 @@ fn build_entries_from_nps(nps_path: &Path) -> Result<Vec<Entry>> {
 
 fn apply_translations_to_nps(source_path: &Path, entries: &[Entry], out_path: &Path) -> Result<()> {
     let content = fs::read_to_string(source_path)?;
-    
+
     let mut sorted_entries: Vec<&Entry> = entries.iter().collect();
     sorted_entries.sort_by_key(|e| (e.line_no, e.id));
 
     let mut entry_iter = sorted_entries.into_iter().peekable();
     let mut out: Vec<String> = Vec::new();
+    let mut skip_until_line: usize = 0;
 
     for (idx, line) in content.lines().enumerate() {
         let line_no = idx + 1;
 
+        if line_no <= skip_until_line {
+            out.push(String::new());
+            continue;
+        }
+
         let mut line_entries: Vec<&Entry> = Vec::new();
         while entry_iter.peek().map(|e| e.line_no == line_no).unwrap_or(false) {
-            line_entries.push(entry_iter.next().unwrap());
+            let entry = entry_iter.next().unwrap();
+            if entry.line_count > 1 {
+                let end_line = line_no + entry.line_count - 1;
+                if end_line > skip_until_line {
+                    skip_until_line = end_line;
+                }
+            }
+            line_entries.push(entry);
         }
 
         if line_entries.is_empty() {
@@ -394,7 +423,12 @@ fn apply_entries_to_line(line: &str, entries: &[&Entry]) -> String {
                 } else {
                     entry.translation.clone()
                 };
-                out_segments.push(format!("{}{}{}", head, text, tail));
+                let final_tail = if entry.line_count > 1 {
+                    entry.tail_tags.clone()
+                } else {
+                    tail.clone()
+                };
+                out_segments.push(format!("{}{}{}", head, text, final_tail));
             } else {
                 out_segments.push(segment.clone());
             }
