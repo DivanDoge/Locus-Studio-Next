@@ -1217,14 +1217,19 @@ function App() {
     setReviewMode(true);
   }
 
-  function updateCurrentTranslation(next: string) {
-    if (currentId === null) return;
-    setEntries((prev) => prev.map((e) => (e.id === currentId ? { ...e, translation: next } : e)));
-  }
-
   function discardReview() {
     setReviewMode(false);
     setReviewDrafts({});
+  }
+
+  function applyReviewChanges() {
+    const nextEntries = entries.map((entry) =>
+      entry.id in reviewDrafts ? { ...entry, translation: reviewDrafts[entry.id] } : entry
+    );
+    setEntries(nextEntries);
+    setReviewMode(false);
+    setReviewDrafts({});
+    setStatus(`Applied ${reviewChangedCount} review change${reviewChangedCount === 1 ? "" : "s"}`);
   }
 
   async function openProject() {
