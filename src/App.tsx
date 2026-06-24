@@ -1098,16 +1098,20 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (typeof window === 'undefined' || !(window as any).__TAURI__) return;
     void (async () => {
       try {
         const update = await check();
-        if (!update) return;
+        console.log("Update check result:", update);
+        if (!update) {
+          setStatus("No updates available");
+          return;
+        }
         setStatus(`Update found: ${update.version}. Downloading...`);
         await update.downloadAndInstall();
         setStatus("Update installed. Restart app to apply.");
-      } catch {
-        /* Update check failed */
+      } catch (e) {
+        console.error("Update check failed:", e);
+        setStatus(`Update check failed: ${String(e)}`);
       }
     })();
   }, []);
