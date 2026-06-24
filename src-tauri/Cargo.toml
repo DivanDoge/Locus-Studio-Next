@@ -1,6 +1,6 @@
 [package]
 name = "nps_studio_next"
-version = "2.0.3"
+version = "2.0.5"
 edition = "2021"
 
 [build-dependencies]

@@ -5,6 +5,7 @@ set "CONFIG_FILE=src-tauri\tauri.conf.json"
 
 if not exist "%CONFIG_FILE%" (
     echo [ERROR] Cannot find %CONFIG_FILE%. Run this script from the project root.
+    pause
     exit /b 1
 )
 
@@ -14,14 +15,32 @@ for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-Content 
 
 if "%VERSION%"=="" (
     echo [ERROR] Could not parse version from %CONFIG_FILE%.
+    pause
     exit /b 1
 )
 
 set "TAG=v%VERSION%"
 
 echo ==========================================
-echo  Releasing Locus Studio Next %TAG%
+echo  Detected version in %CONFIG_FILE%: %VERSION%
+echo  Tag to be created: %TAG%
 echo ==========================================
+echo.
+echo Current git status:
+echo ------------------------------------------
+git status -s
+echo ------------------------------------------
+echo.
+echo Existing local tags matching v*:
+git tag -l "v*"
+echo.
+
+set /p CONFIRM="Proceed with commit, push and tag %TAG%? (Y/N): "
+if /i not "%CONFIRM%"=="Y" (
+    echo [CANCELLED] Aborted by user. Nothing was pushed.
+    pause
+    exit /b 0
+)
 
 echo.
 echo [1/4] Staging changes...
@@ -39,6 +58,7 @@ echo [3/4] Pushing to current branch...
 git push
 if errorlevel 1 (
     echo [ERROR] git push failed.
+    pause
     exit /b 1
 )
 
@@ -46,13 +66,15 @@ echo.
 echo [4/4] Creating and pushing tag %TAG%...
 git tag %TAG%
 if errorlevel 1 (
-    echo [ERROR] Tag %TAG% may already exist locally.
+    echo [ERROR] Tag %TAG% may already exist locally. Delete it first with: git tag -d %TAG%
+    pause
     exit /b 1
 )
 
 git push origin %TAG%
 if errorlevel 1 (
     echo [ERROR] Failed to push tag %TAG%.
+    pause
     exit /b 1
 )
 
@@ -62,4 +84,5 @@ echo  Done! GitHub Actions should now be building %TAG%.
 echo  Check: https://github.com/DivanDoge/Locus-Studio-Next/actions
 echo ==========================================
 
+pause
 endlocal
