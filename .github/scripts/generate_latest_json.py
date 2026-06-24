@@ -3,6 +3,7 @@ import json
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 
 
 def find_path(root: Path, *needles: str) -> Path:
@@ -18,7 +19,8 @@ def read_sig(path: Path) -> str:
 
 
 def asset_url(path: Path, repo: str, tag: str) -> str:
-    return f"https://github.com/{repo}/releases/download/{tag}/{path.name}"
+    encoded_name = quote(path.name)
+    return f"https://github.com/{repo}/releases/download/{tag}/{encoded_name}"
 
 
 def main() -> None:
