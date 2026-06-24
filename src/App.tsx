@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
-import { check } from "@tauri-apps/plugin-updater";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import { getVersion } from "@tauri-apps/api/app";
 // @ts-ignore
 import GridLayout, { Layout } from "react-grid-layout";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { relaunch } from "@tauri-apps/plugin-process";
 
 // в”Ђв”Ђ SVG Icons в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 const Ico = {
@@ -317,6 +318,11 @@ function App() {
     if (typeof window === "undefined") return false;
     return new URLSearchParams(window.location.search).get("splash") === "1";
   }, []);
+  const [updateInfo, setUpdateInfo] = useState<Update | null>(null);
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const [updateDownloading, setUpdateDownloading] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState({ downloaded: 0, total: 0 });
+  const [updateReadyToRestart, setUpdateReadyToRestart] = useState(false);
   const [startupVisible, setStartupVisible] = useState(() => isSplashWindow);
   const [startupProgress, setStartupProgress] = useState(0);
   const [startupStage, setStartupStage] = useState("Initializing modules...");
@@ -1097,24 +1103,66 @@ function App() {
     })();
   }, []);
 
-  useEffect(() => {
-    void (async () => {
-      try {
-        const update = await check();
-        console.log("Update check result:", update);
-        if (!update) {
-          setStatus("No updates available");
-          return;
-        }
-        setStatus(`Update found: ${update.version}. Downloading...`);
-        await update.downloadAndInstall();
-        setStatus("Update installed. Restart app to apply.");
-      } catch (e) {
-        console.error("Update check failed:", e);
-        setStatus(`Update check failed: ${String(e)}`);
+useEffect(() => {
+  void (async () => {
+    try {
+      const update = await check();
+      console.log("Update check result:", update);
+      if (!update) return;
+      setUpdateInfo(update);
+      setUpdateDialogOpen(true);
+    } catch (e) {
+      console.error("Update check failed:", e);
+    }
+  })();
+}, []);
+
+async function startUpdateDownload() {
+  console.log("startUpdateDownload called", updateInfo);
+  if (!updateInfo) return;
+  setUpdateDownloading(true);
+  setUpdateProgress({ downloaded: 0, total: 0 });
+  try {
+    await updateInfo.downloadAndInstall((event) => {
+      console.log("update event:", event);
+      if (event.event === "Started") {
+        setUpdateProgress({ downloaded: 0, total: event.data.contentLength ?? 0 });
+      } else if (event.event === "Progress") {
+        setUpdateProgress((prev) => ({ ...prev, downloaded: prev.downloaded + event.data.chunkLength }));
+      } else if (event.event === "Finished") {
+        setUpdateReadyToRestart(true);
       }
-    })();
-  }, []);
+    });
+    console.log("downloadAndInstall finished");
+  } catch (e) {
+    console.error("Update download error:", e);
+    setStatus(`Update failed: ${String(e)}`);
+    setUpdateDownloading(false);
+  }
+  if (!updateInfo) return;
+  setUpdateDownloading(true);
+  setUpdateProgress({ downloaded: 0, total: 0 });
+  try {
+    await updateInfo.downloadAndInstall((event) => {
+      if (event.event === "Started") {
+        setUpdateProgress({ downloaded: 0, total: event.data.contentLength ?? 0 });
+      } else if (event.event === "Progress") {
+        setUpdateProgress((prev) => ({ ...prev, downloaded: prev.downloaded + event.data.chunkLength }));
+      } else if (event.event === "Finished") {
+        setUpdateReadyToRestart(true);
+      }
+    });
+  } catch (e) {
+    setStatus(`Update failed: ${String(e)}`);
+    setUpdateDownloading(false);
+  }
+}
+
+function dismissUpdateDialog() {
+  setUpdateDialogOpen(false);
+  setUpdateDownloading(false);
+  setUpdateReadyToRestart(false);
+}
 
   // ── Review Mode ─────────────────────────────────────────────────────────
   const reviewEntries = useMemo(() => {
@@ -2385,6 +2433,54 @@ function App() {
               <button className="btn primary" onClick={() => void saveNameManager()} disabled={aliasSaving}>
                 {Ico.save} {aliasSaving ? "Saving..." : "Save Names"}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {updateDialogOpen && updateInfo && (
+        <div className="modal-overlay" onClick={() => !updateDownloading && dismissUpdateDialog()}>
+          <div className="import-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="import-modal-header">
+              <h3>Update available: v{updateInfo.version}</h3>
+              {!updateDownloading && (
+                <button className="mini-btn" onClick={dismissUpdateDialog}>Close</button>
+              )}
+            </div>
+
+            <div className="import-modal-section">
+              {updateInfo.body && <p>{updateInfo.body}</p>}
+
+              {!updateDownloading && !updateReadyToRestart && (
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <button className="btn primary" onClick={startUpdateDownload}>Download & Install</button>
+                  <button className="btn" onClick={dismissUpdateDialog}>Later</button>
+                </div>
+              )}
+
+              {updateDownloading && !updateReadyToRestart && (
+                <div style={{ marginTop: 12 }}>
+                  <div className="project-file-progress-track">
+                    <div
+                      className="project-file-progress-fill"
+                      style={{
+                        width: updateProgress.total
+                          ? `${Math.min(100, (updateProgress.downloaded / updateProgress.total) * 100)}%`
+                          : "30%",
+                      }}
+                    />
+                  </div>
+                  <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
+                    Downloading update...
+                  </div>
+                </div>
+              )}
+
+              {updateReadyToRestart && (
+                <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+                  <button className="btn primary" onClick={() => relaunch()}>Restart Now</button>
+                  <button className="btn" onClick={dismissUpdateDialog}>Restart Later</button>
+                </div>
+              )}
             </div>
           </div>
         </div>
