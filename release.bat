@@ -8,17 +8,9 @@ if not exist "%CONFIG_FILE%" (
     exit /b 1
 )
 
-rem Extract the "version": "X.Y.Z" value from tauri.conf.json
-for /f "tokens=2 delims=:," %%A in ('findstr /r /c:"\"version\"" "%CONFIG_FILE%"') do (
-    set "RAW_VERSION=%%A"
-    goto :gotversion
+for /f "usebackq delims=" %%A in (`powershell -NoProfile -Command "(Get-Content -Raw '%CONFIG_FILE%' | ConvertFrom-Json).version"`) do (
+    set "VERSION=%%A"
 )
-
-:gotversion
-rem Strip quotes and whitespace
-set "RAW_VERSION=%RAW_VERSION: =%"
-set "RAW_VERSION=%RAW_VERSION:"=%"
-set "VERSION=%RAW_VERSION%"
 
 if "%VERSION%"=="" (
     echo [ERROR] Could not parse version from %CONFIG_FILE%.
