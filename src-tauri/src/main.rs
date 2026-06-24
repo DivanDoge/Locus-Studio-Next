@@ -370,7 +370,6 @@ fn apply_translations_to_nps(source_path: &Path, entries: &[Entry], out_path: &P
             out.push(apply_entries_to_line(line, &line_entries));
         }
     }
-
     fs::write(out_path, out.join("\n"))?;
     Ok(())
 }

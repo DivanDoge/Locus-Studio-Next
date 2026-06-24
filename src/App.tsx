@@ -3,8 +3,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { check } from "@tauri-apps/plugin-updater";
+import { getVersion } from "@tauri-apps/api/app";
 // @ts-ignore
 import GridLayout, { Layout } from "react-grid-layout";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 
 // в”Ђв”Ђ SVG Icons в”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђв”Ђ
 const Ico = {
@@ -389,6 +391,7 @@ function App() {
   const [reviewDrafts, setReviewDrafts] = useState<Record<number, string>>({});
   const [reviewCurrentId, setReviewCurrentId] = useState<number | null>(null);
   const [reviewFilter, setReviewFilter] = useState<"all" | "modified" | "unedited">("all");
+  const [appVersion, setAppVersion] = useState("");
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const gridRows = 30;
   const rowHeight = useMemo(() => {
@@ -400,6 +403,18 @@ function App() {
     () => (isDesktopLayout ? desktopLayout : compactLayout),
     [isDesktopLayout, desktopLayout, compactLayout]
   );
+
+  useEffect(() => {
+      (async () => {
+        try {
+          const v = await getVersion();
+          setAppVersion(v);
+          await getCurrentWindow().setTitle(`Locus Studio Next v${v}`);
+        } catch (e) {
+          console.error("Version/title error:", e);
+        }
+      })();
+    }, []);
 
   useEffect(() => {
     if (!isSplashWindow) return;
@@ -1688,7 +1703,12 @@ function App() {
                   })}
                 </div>
               )}
-            </div>
+              </div>
+            {appVersion && (
+              <div style={{ textAlign: "center", paddingTop: "12px", opacity: 0.5, fontSize: "12px" }}>
+                v{appVersion}
+              </div>
+            )}
           </div>
         </div>
       ) : (
