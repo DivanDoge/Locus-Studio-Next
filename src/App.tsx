@@ -516,6 +516,7 @@ function App() {
   const [updateProgress, setUpdateProgress] = useState({ downloaded: 0, total: 0 });
   const [updateReadyToRestart, setUpdateReadyToRestart] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateError, setUpdateError] = useState("");
   const [startupVisible, setStartupVisible] = useState(() => isSplashWindow);
   const [startupProgress, setStartupProgress] = useState(0);
   const [startupStage, setStartupStage] = useState("Initializing modules...");
@@ -1407,6 +1408,7 @@ const checkForUpdates = useCallback(async (manual: boolean) => {
   if (updateCheckInFlightRef.current) return;
   updateCheckInFlightRef.current = true;
   setUpdateChecking(true);
+  setUpdateError("");
   try {
     const update = await check();
     console.log("Update check result:", update);
@@ -1437,24 +1439,38 @@ useEffect(() => {
 async function startUpdateDownload() {
   console.log("startUpdateDownload called", updateInfo);
   if (!updateInfo) return;
+  setUpdateError("");
+  setUpdateReadyToRestart(false);
   setUpdateDownloading(true);
   setUpdateProgress({ downloaded: 0, total: 0 });
   try {
-    await updateInfo.downloadAndInstall((event) => {
+    // Get a fresh update handle right before download to avoid stale handles after long idle time.
+    const freshUpdate = await check();
+    if (!freshUpdate) {
+      setStatus("No update found. You may already be on the latest version.");
+      setUpdateDownloading(false);
+      return;
+    }
+
+    setUpdateInfo(freshUpdate);
+    await freshUpdate.downloadAndInstall((event) => {
       console.log("update event:", event);
       if (event.event === "Started") {
         setUpdateProgress({ downloaded: 0, total: event.data.contentLength ?? 0 });
       } else if (event.event === "Progress") {
         setUpdateProgress((prev) => ({ ...prev, downloaded: prev.downloaded + event.data.chunkLength }));
       } else if (event.event === "Finished") {
-        setUpdateDownloading(false);
         setUpdateReadyToRestart(true);
       }
     });
     console.log("downloadAndInstall finished");
+    setStatus("Update downloaded. Restart to apply.");
   } catch (e) {
     console.error("Update download error:", e);
-    setStatus(`Update failed: ${String(e)}`);
+    const message = e instanceof Error ? e.message : String(e);
+    setUpdateError(message);
+    setStatus(`Update failed: ${message}`);
+  } finally {
     setUpdateDownloading(false);
   }
 }
@@ -3179,6 +3195,12 @@ function dismissUpdateDialog() {
 
             <div className="import-modal-section">
               {updateInfo.body && <p>{updateInfo.body}</p>}
+
+              {updateError && (
+                <div style={{ color: "var(--red)", border: "1px solid rgba(240, 113, 120, 0.45)", borderRadius: 6, padding: "8px 10px", background: "rgba(240, 113, 120, 0.08)" }}>
+                  Update error: {updateError}
+                </div>
+              )}
 
               {!updateDownloading && !updateReadyToRestart && (
                 <div style={{ display: "flex", gap: 8, marginTop: 12 }}>

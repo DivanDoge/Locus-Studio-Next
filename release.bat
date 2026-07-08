@@ -1,10 +1,26 @@
 @echo off
 setlocal enabledelayedexpansion
 
-set "CONFIG_FILE=src-tauri\tauri.conf.json"
+set "CONFIG_FILE=package.json"
 
 if not exist "%CONFIG_FILE%" (
     echo [ERROR] Cannot find %CONFIG_FILE%. Run this script from the project root.
+    pause
+    exit /b 1
+)
+
+where npm >nul 2>nul
+if errorlevel 1 (
+    echo [ERROR] npm was not found.
+    echo Install Node.js 18+ and try again.
+    pause
+    exit /b 1
+)
+
+echo [INFO] Syncing version from package.json to Tauri/Cargo files...
+call npm run sync-version
+if errorlevel 1 (
+    echo [ERROR] Version sync failed.
     pause
     exit /b 1
 )
