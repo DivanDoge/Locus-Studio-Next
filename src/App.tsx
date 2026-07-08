@@ -51,6 +51,101 @@ interface ImportSettings {
   skipEmptyTranslations: boolean;
 }
 
+type ImportIssueSeverity = "error" | "warn";
+
+interface ImportIssue {
+  code: string;
+  label: string;
+  severity: ImportIssueSeverity;
+}
+
+interface ImportIssueDetail {
+  entryId: number;
+  lineNo: number;
+  type: string;
+  speaker: string;
+  original: string;
+  currentTranslation: string;
+  importedTranslation: string;
+}
+
+interface ImportFileDiagnostics {
+  analyzed: boolean;
+  changed: number;
+  matched: number;
+  total: number;
+  method: string;
+  issues: ImportIssue[];
+  issueDetailsByCode: Record<string, ImportIssueDetail[]>;
+  error?: string;
+}
+
+interface ImportPreviewRow {
+  project: StudioProject;
+  projectName: string;
+  autoPath: string | null;
+  assignedPath: string | null;
+}
+
+interface ImportFileDescriptor {
+  path: string;
+  fileName: string;
+  stem: string;
+  normalized: string;
+  markers: Set<string>;
+  tokens: Set<string>;
+}
+
+interface ProjectMatchHints {
+  keys: Set<string>;
+  normalizedKeys: Set<string>;
+  markers: Set<string>;
+  tokens: Set<string>;
+}
+
+type ImportDragPayload =
+  | { kind: "project"; projectId: string }
+  | { kind: "file"; path: string };
+
+const IMPORT_DRAG_MIME = "application/x-locus-import-drag";
+const IMPORT_ISSUE_DETAIL_LIMIT = 120;
+
+function formatInspectorValue(value: string): string {
+  if (!value.length) return "(empty)";
+  return value.replace(/\r/g, "\\r").replace(/\n/g, "\\n\n").replace(/\t/g, "\\t");
+}
+
+function readImportDragPayload(
+  event: React.DragEvent<HTMLElement>,
+  fallback: ImportDragPayload | null
+): ImportDragPayload | null {
+  const direct = event.dataTransfer.getData(IMPORT_DRAG_MIME);
+  if (direct) {
+    try {
+      const parsed = JSON.parse(direct) as ImportDragPayload;
+      if (parsed && (parsed.kind === "project" || parsed.kind === "file")) {
+        return parsed;
+      }
+    } catch {
+      // ignore malformed payload
+    }
+  }
+
+  const plain = event.dataTransfer.getData("text/plain");
+  if (plain.startsWith("locus-import:")) {
+    try {
+      const parsed = JSON.parse(plain.slice("locus-import:".length)) as ImportDragPayload;
+      if (parsed && (parsed.kind === "project" || parsed.kind === "file")) {
+        return parsed;
+      }
+    } catch {
+      // ignore malformed payload
+    }
+  }
+
+  return fallback;
+}
+
 type UIPresetId = "balanced" | "writer" | "inspector";
 
 interface StudioProject {
@@ -255,6 +350,11 @@ function getFileName(path: string): string {
   return (parts[parts.length - 1] || path).toLowerCase();
 }
 
+function getDisplayFileName(path: string): string {
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
+}
+
 function getFileStem(fileName: string): string {
   const idx = fileName.lastIndexOf(".");
   if (idx <= 0) return fileName;
@@ -264,47 +364,139 @@ function getFileStem(fileName: string): string {
 function normalizeImportStem(stem: string): string {
   return stem
     .toLowerCase()
-    .replace(/[\s]+/g, "")
+    .replace(/^(?:proof|tested|translated|translate|locali[sz]ed?|draft|tmp|backup)[_-]+/g, "")
     .replace(/[_-](?:copy)?\d+$/i, "")
-    .replace(/\((?:copy|\d+)\)$/i, "");
+    .replace(/\((?:copy|\d+)\)$/i, "")
+    .replace(/[^a-z0-9]+/g, "");
 }
 
-function buildImportLookup(paths: string[]): Map<string, string> {
-  const map = new Map<string, string>();
-  for (const path of paths) {
+function extractMarkersAndTokens(value: string): { markers: Set<string>; tokens: Set<string> } {
+  const words = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter(Boolean);
+  const markers = new Set<string>();
+  const tokens = new Set<string>();
+
+  for (const word of words) {
+    if (/^[a-z]{1,4}\d{2,5}[a-z]?$/.test(word) || /^\d{2,5}[a-z]?$/.test(word)) {
+      markers.add(word);
+    }
+    if (word.length >= 3 && !/^(proof|tested|translated|translate|json|nps|file|final|draft|tmp)$/.test(word)) {
+      tokens.add(word);
+    }
+  }
+
+  return { markers, tokens };
+}
+
+function buildImportDescriptors(paths: string[]): ImportFileDescriptor[] {
+  return paths.map((path) => {
     const fileName = getFileName(path);
     const stem = getFileStem(fileName);
-    const normalizedStem = normalizeImportStem(stem);
-    if (!map.has(fileName)) map.set(fileName, path);
-    if (!map.has(stem)) map.set(stem, path);
-    if (normalizedStem && !map.has(normalizedStem)) map.set(normalizedStem, path);
-  }
-  return map;
+    const normalized = normalizeImportStem(stem);
+    const { markers, tokens } = extractMarkersAndTokens(stem);
+    return {
+      path,
+      fileName,
+      stem,
+      normalized,
+      markers,
+      tokens,
+    };
+  });
 }
 
-function resolveImportForProject(project: StudioProject, lookup: Map<string, string>): string | null {
-  const candidates: string[] = [];
+function buildProjectMatchHints(project: StudioProject): ProjectMatchHints {
+  const keys = new Set<string>();
+  const normalizedKeys = new Set<string>();
+  const markers = new Set<string>();
+  const tokens = new Set<string>();
 
-  const pushNameCandidates = (name: string) => {
-    const stem = getFileStem(name);
-    candidates.push(name, stem, normalizeImportStem(stem));
+  const collect = (name: string) => {
+    const fileName = getFileName(name);
+    const stem = getFileStem(fileName);
+    const normalized = normalizeImportStem(stem);
+    keys.add(fileName);
+    keys.add(stem);
+    if (normalized) normalizedKeys.add(normalized);
+
+    const extracted = extractMarkersAndTokens(stem);
+    for (const marker of extracted.markers) markers.add(marker);
+    for (const token of extracted.tokens) tokens.add(token);
   };
 
   if (project.sourcePath) {
-    const sourceName = getFileName(project.sourcePath);
-    pushNameCandidates(sourceName);
+    collect(project.sourcePath);
   }
   if (project.jsonPath) {
-    const jsonName = getFileName(project.jsonPath);
-    pushNameCandidates(jsonName);
+    collect(project.jsonPath);
   }
-  pushNameCandidates(getFileName(project.name));
+  collect(project.name);
 
-  for (const key of candidates) {
-    const match = lookup.get(key);
-    if (match) return match;
+  return { keys, normalizedKeys, markers, tokens };
+}
+
+function scoreImportDescriptor(hints: ProjectMatchHints, descriptor: ImportFileDescriptor): number {
+  let score = 0;
+
+  if (hints.keys.has(descriptor.fileName)) score += 1000;
+  if (hints.keys.has(descriptor.stem)) score += 900;
+  if (hints.normalizedKeys.has(descriptor.normalized)) score += 820;
+
+  let markerHits = 0;
+  for (const marker of hints.markers) {
+    if (descriptor.markers.has(marker)) markerHits += 1;
   }
-  return null;
+  if (markerHits > 0) score += markerHits * 520;
+
+  let tokenHits = 0;
+  for (const token of hints.tokens) {
+    if (descriptor.tokens.has(token)) tokenHits += 1;
+  }
+  if (tokenHits > 0) score += tokenHits * 90;
+
+  for (const normalizedKey of hints.normalizedKeys) {
+    if (!normalizedKey || normalizedKey.length < 4 || !descriptor.normalized) continue;
+    if (descriptor.normalized.includes(normalizedKey) || normalizedKey.includes(descriptor.normalized)) {
+      score += 180;
+      break;
+    }
+  }
+
+  return score;
+}
+
+function buildAutoImportAssignments(projects: StudioProject[], paths: string[]): Map<string, string | null> {
+  const descriptors = buildImportDescriptors(paths);
+  const byProject = new Map<string, string | null>();
+  for (const project of projects) {
+    byProject.set(project.id, null);
+  }
+
+  const pairs: Array<{ projectId: string; path: string; score: number }> = [];
+  for (const project of projects) {
+    const hints = buildProjectMatchHints(project);
+    for (const descriptor of descriptors) {
+      const score = scoreImportDescriptor(hints, descriptor);
+      if (score > 0) {
+        pairs.push({ projectId: project.id, path: descriptor.path, score });
+      }
+    }
+  }
+
+  pairs.sort((a, b) => b.score - a.score);
+  const usedProjects = new Set<string>();
+  const usedPaths = new Set<string>();
+  for (const pair of pairs) {
+    if (usedProjects.has(pair.projectId) || usedPaths.has(pair.path)) continue;
+    byProject.set(pair.projectId, pair.path);
+    usedProjects.add(pair.projectId);
+    usedPaths.add(pair.path);
+  }
+
+  return byProject;
 }
 
 function replaceFirstOccurrence(input: string, search: string, replacement: string): string {
@@ -323,6 +515,7 @@ function App() {
   const [updateDownloading, setUpdateDownloading] = useState(false);
   const [updateProgress, setUpdateProgress] = useState({ downloaded: 0, total: 0 });
   const [updateReadyToRestart, setUpdateReadyToRestart] = useState(false);
+  const [updateChecking, setUpdateChecking] = useState(false);
   const [startupVisible, setStartupVisible] = useState(() => isSplashWindow);
   const [startupProgress, setStartupProgress] = useState(0);
   const [startupStage, setStartupStage] = useState("Initializing modules...");
@@ -351,6 +544,13 @@ function App() {
   const [aliasSaving, setAliasSaving] = useState(false);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [importPaths, setImportPaths] = useState<string[]>([]);
+  const [manualImportAssignments, setManualImportAssignments] = useState<Record<string, string>>({});
+  const [importForcedUnmatched, setImportForcedUnmatched] = useState<Record<string, boolean>>({});
+  const [importDragPayload, setImportDragPayload] = useState<ImportDragPayload | null>(null);
+  const [importDropTargetId, setImportDropTargetId] = useState<string | null>(null);
+  const [importDiagnosticsByProject, setImportDiagnosticsByProject] = useState<Record<string, ImportFileDiagnostics>>({});
+  const [importDiagnosticsBusy, setImportDiagnosticsBusy] = useState(false);
+  const [importInspectorState, setImportInspectorState] = useState<{ projectId: string; issueCode: string } | null>(null);
   const [importBusy, setImportBusy] = useState(false);
   const [importProgressState, setImportProgressState] = useState<{
     active: boolean;
@@ -398,6 +598,7 @@ function App() {
   const [reviewCurrentId, setReviewCurrentId] = useState<number | null>(null);
   const [reviewFilter, setReviewFilter] = useState<"all" | "modified" | "unedited">("all");
   const [appVersion, setAppVersion] = useState("");
+  const updateCheckInFlightRef = useRef(false);
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const gridRows = 30;
   const rowHeight = useMemo(() => {
@@ -569,6 +770,73 @@ function App() {
     return Math.max(0, Math.min(100, Math.round((importProgressState.current / importProgressState.total) * 100)));
   }, [importProgressState.current, importProgressState.total]);
 
+  const importableProjects = useMemo(
+    () => projects.filter((project) => project.entries.length > 0),
+    [projects]
+  );
+
+  const autoImportAssignments = useMemo(() => {
+    return buildAutoImportAssignments(importableProjects, importPaths);
+  }, [importPaths, importableProjects]);
+
+  const importPreviewRows = useMemo<ImportPreviewRow[]>(() => {
+    return importableProjects.map((project) => {
+      const autoPath = autoImportAssignments.get(project.id) ?? null;
+      const manualPath = manualImportAssignments[project.id];
+      const assignedPath = importForcedUnmatched[project.id]
+        ? null
+        : manualPath && importPaths.includes(manualPath)
+          ? manualPath
+          : autoPath;
+      return {
+        project,
+        projectName: getProjectDisplayName(project),
+        autoPath,
+        assignedPath,
+      };
+    });
+  }, [importableProjects, autoImportAssignments, manualImportAssignments, importPaths, importForcedUnmatched]);
+
+  const assignedImportByProject = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const row of importPreviewRows) {
+      map.set(row.project.id, row.assignedPath);
+    }
+    return map;
+  }, [importPreviewRows]);
+
+  const assignedPathOwners = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const row of importPreviewRows) {
+      if (!row.assignedPath) continue;
+      const owners = map.get(row.assignedPath);
+      if (owners) owners.push(row.project.id);
+      else map.set(row.assignedPath, [row.project.id]);
+    }
+    return map;
+  }, [importPreviewRows]);
+
+  const importAssignmentSignature = useMemo(
+    () => importPreviewRows.map((row) => `${row.project.id}:${row.assignedPath || ""}:${importForcedUnmatched[row.project.id] ? 1 : 0}`).join("|"),
+    [importPreviewRows, importForcedUnmatched]
+  );
+
+  const importInspectorView = useMemo(() => {
+    if (!importInspectorState) return null;
+    const row = importPreviewRows.find((item) => item.project.id === importInspectorState.projectId);
+    if (!row) return null;
+    const diagnostics = importDiagnosticsByProject[importInspectorState.projectId];
+    if (!diagnostics) return null;
+    const issue = diagnostics.issues.find((item) => item.code === importInspectorState.issueCode);
+    const details = diagnostics.issueDetailsByCode[importInspectorState.issueCode] || [];
+    return {
+      row,
+      diagnostics,
+      issueLabel: issue?.label || "Issue details",
+      details,
+    };
+  }, [importInspectorState, importPreviewRows, importDiagnosticsByProject]);
+
   const projectLoadPercent = useMemo(() => {
     if (!projectLoadState.total) return 0;
     return Math.max(0, Math.min(100, Math.round((projectLoadState.current / projectLoadState.total) * 100)));
@@ -649,15 +917,47 @@ function App() {
   useEffect(() => { localStorage.setItem("nps-import-settings", JSON.stringify(importSettings)); }, [importSettings]);
 
   useEffect(() => {
+    setManualImportAssignments((prev) => {
+      const next: Record<string, string> = {};
+      for (const [projectId, path] of Object.entries(prev)) {
+        if (!importableProjects.some((project) => project.id === projectId)) continue;
+        if (!importPaths.includes(path)) continue;
+        next[projectId] = path;
+      }
+      return next;
+    });
+
+    setImportForcedUnmatched((prev) => {
+      const next: Record<string, boolean> = {};
+      for (const [projectId, forced] of Object.entries(prev)) {
+        if (!forced) continue;
+        if (!importableProjects.some((project) => project.id === projectId)) continue;
+        next[projectId] = true;
+      }
+      return next;
+    });
+  }, [importableProjects, importPaths]);
+
+  useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
+      if (importInspectorState) {
+        setImportInspectorState(null);
+        return;
+      }
       if (importDialogOpen && !importBusy) {
         setImportDialogOpen(false);
       }
     };
     window.addEventListener("keydown", handleEsc);
     return () => window.removeEventListener("keydown", handleEsc);
-  }, [importDialogOpen, importBusy]);
+  }, [importDialogOpen, importBusy, importInspectorState]);
+
+  useEffect(() => {
+    if (!importDialogOpen) {
+      setImportInspectorState(null);
+    }
+  }, [importDialogOpen]);
 
   // Load real source file content (for inspector)
   useEffect(() => {
@@ -1103,19 +1403,36 @@ function App() {
     })();
   }, []);
 
-useEffect(() => {
-  void (async () => {
-    try {
-      const update = await check();
-      console.log("Update check result:", update);
-      if (!update) return;
-      setUpdateInfo(update);
-      setUpdateDialogOpen(true);
-    } catch (e) {
-      console.error("Update check failed:", e);
+const checkForUpdates = useCallback(async (manual: boolean) => {
+  if (updateCheckInFlightRef.current) return;
+  updateCheckInFlightRef.current = true;
+  setUpdateChecking(true);
+  try {
+    const update = await check();
+    console.log("Update check result:", update);
+    if (!update) {
+      if (manual) setStatus("You are using the latest version.");
+      return;
     }
-  })();
+
+    setUpdateInfo(update);
+    setUpdateProgress({ downloaded: 0, total: 0 });
+    setUpdateDownloading(false);
+    setUpdateReadyToRestart(false);
+    setUpdateDialogOpen(true);
+    if (manual) setStatus(`Update available: v${update.version}`);
+  } catch (e) {
+    console.error("Update check failed:", e);
+    if (manual) setStatus(`Update check failed: ${String(e)}`);
+  } finally {
+    updateCheckInFlightRef.current = false;
+    setUpdateChecking(false);
+  }
 }, []);
+
+useEffect(() => {
+  void checkForUpdates(false);
+}, [checkForUpdates]);
 
 async function startUpdateDownload() {
   console.log("startUpdateDownload called", updateInfo);
@@ -1130,29 +1447,13 @@ async function startUpdateDownload() {
       } else if (event.event === "Progress") {
         setUpdateProgress((prev) => ({ ...prev, downloaded: prev.downloaded + event.data.chunkLength }));
       } else if (event.event === "Finished") {
+        setUpdateDownloading(false);
         setUpdateReadyToRestart(true);
       }
     });
     console.log("downloadAndInstall finished");
   } catch (e) {
     console.error("Update download error:", e);
-    setStatus(`Update failed: ${String(e)}`);
-    setUpdateDownloading(false);
-  }
-  if (!updateInfo) return;
-  setUpdateDownloading(true);
-  setUpdateProgress({ downloaded: 0, total: 0 });
-  try {
-    await updateInfo.downloadAndInstall((event) => {
-      if (event.event === "Started") {
-        setUpdateProgress({ downloaded: 0, total: event.data.contentLength ?? 0 });
-      } else if (event.event === "Progress") {
-        setUpdateProgress((prev) => ({ ...prev, downloaded: prev.downloaded + event.data.chunkLength }));
-      } else if (event.event === "Finished") {
-        setUpdateReadyToRestart(true);
-      }
-    });
-  } catch (e) {
     setStatus(`Update failed: ${String(e)}`);
     setUpdateDownloading(false);
   }
@@ -1475,7 +1776,7 @@ function dismissUpdateDialog() {
       ]
     });
     if (!selected) return;
-    const selectedPaths = Array.isArray(selected) ? selected : [selected];
+    const selectedPaths = Array.from(new Set(Array.isArray(selected) ? selected : [selected]));
     setImportPaths(selectedPaths);
   }
 
@@ -1484,18 +1785,256 @@ function dismissUpdateDialog() {
     setImportDialogOpen(true);
   }
 
+  function updateManualAssignmentsForSwap(
+    sourceProjectId: string,
+    targetProjectId: string,
+    sourceAssignedPath: string | null,
+    targetAssignedPath: string | null
+  ) {
+    setManualImportAssignments((prev) => {
+      const next = { ...prev };
+      if (targetAssignedPath) next[sourceProjectId] = targetAssignedPath;
+      else delete next[sourceProjectId];
+      if (sourceAssignedPath) next[targetProjectId] = sourceAssignedPath;
+      else delete next[targetProjectId];
+      return next;
+    });
+  }
+
+  function assignImportPathToProject(targetProjectId: string, nextPath: string | null) {
+    const targetAssignedPath = assignedImportByProject.get(targetProjectId) ?? null;
+    const sourceOwner = nextPath
+      ? importPreviewRows.find((row) => row.project.id !== targetProjectId && row.assignedPath === nextPath)?.project.id ?? null
+      : null;
+
+    setManualImportAssignments((prev) => {
+      const next = { ...prev };
+
+      if (!nextPath) {
+        delete next[targetProjectId];
+      } else {
+        next[targetProjectId] = nextPath;
+      }
+
+      if (sourceOwner) {
+        if (targetAssignedPath) next[sourceOwner] = targetAssignedPath;
+        else delete next[sourceOwner];
+      }
+
+      return next;
+    });
+
+    setImportForcedUnmatched((prev) => {
+      const next = { ...prev };
+      if (!nextPath) {
+        next[targetProjectId] = true;
+      } else {
+        delete next[targetProjectId];
+      }
+
+      if (sourceOwner) {
+        // Source owner received another path (or auto fallback), so it should not stay force-unmatched.
+        delete next[sourceOwner];
+      }
+
+      return next;
+    });
+  }
+
+  function handleImportProjectDragStart(projectId: string, event: React.DragEvent<HTMLElement>) {
+    if (importBusy) return;
+    const payload: ImportDragPayload = { kind: "project", projectId };
+    setImportDragPayload(payload);
+    event.dataTransfer.effectAllowed = "move";
+    const encoded = JSON.stringify(payload);
+    event.dataTransfer.setData(IMPORT_DRAG_MIME, encoded);
+    event.dataTransfer.setData("text/plain", `locus-import:${encoded}`);
+  }
+
+  function handleImportDropOnProject(targetProjectId: string, event: React.DragEvent<HTMLElement>) {
+    if (importBusy) return;
+    const payload = readImportDragPayload(event, importDragPayload);
+    if (!payload) return;
+
+    if (payload.kind === "project") {
+      const sourceProjectId = payload.projectId;
+      if (sourceProjectId === targetProjectId) return;
+      const sourceAssignedPath = assignedImportByProject.get(sourceProjectId) ?? null;
+      const targetAssignedPath = assignedImportByProject.get(targetProjectId) ?? null;
+      updateManualAssignmentsForSwap(sourceProjectId, targetProjectId, sourceAssignedPath, targetAssignedPath);
+      return;
+    }
+
+    assignImportPathToProject(targetProjectId, payload.path);
+  }
+
+  const analyzeImportAssignments = useCallback(async () => {
+    if (!importDialogOpen) return;
+    if (!importPreviewRows.length) {
+      setImportDiagnosticsByProject({});
+      return;
+    }
+
+    setImportDiagnosticsBusy(true);
+    const nextDiagnostics: Record<string, ImportFileDiagnostics> = {};
+
+    for (const row of importPreviewRows) {
+      const duplicateOwnerCount = row.assignedPath ? (assignedPathOwners.get(row.assignedPath)?.length ?? 0) : 0;
+      const issues: ImportIssue[] = [];
+      const issueDetailsByCode: Record<string, ImportIssueDetail[]> = {};
+
+      const pushIssue = (code: string, label: string, severity: ImportIssueSeverity) => {
+        issues.push({ code, label, severity });
+      };
+
+      const addDetail = (code: string, detail: ImportIssueDetail) => {
+        const list = issueDetailsByCode[code] || (issueDetailsByCode[code] = []);
+        if (list.length < IMPORT_ISSUE_DETAIL_LIMIT) {
+          list.push(detail);
+        }
+      };
+
+      if (!row.assignedPath) {
+        pushIssue("file_not_matched", "File is not matched", "error");
+      }
+      if (duplicateOwnerCount > 1) {
+        pushIssue("duplicate_assignment", `Duplicate assignment: used ${duplicateOwnerCount} times`, "warn");
+      }
+
+      if (!row.assignedPath) {
+        nextDiagnostics[row.project.id] = {
+          analyzed: true,
+          changed: 0,
+          matched: 0,
+          total: row.project.entries.length,
+          method: "",
+          issues,
+          issueDetailsByCode,
+        };
+        continue;
+      }
+
+      try {
+        const result = await invoke<ImportResult>("import_translation_file", {
+          path: row.assignedPath,
+          entries: row.project.entries,
+          overwrite: true,
+        });
+
+        let changed = 0;
+        let missingCount = 0;
+        let newlineCount = 0;
+        let sameAsOriginalCount = 0;
+        let leadingTrailingCount = 0;
+
+        for (let i = 0; i < result.entries.length; i += 1) {
+          const before = row.project.entries[i];
+          const after = result.entries[i];
+          if (!before || !after) continue;
+
+          const detail: ImportIssueDetail = {
+            entryId: before.id,
+            lineNo: before.line_no,
+            type: before.type,
+            speaker: before.speaker,
+            original: before.original,
+            currentTranslation: before.translation,
+            importedTranslation: after.translation || "",
+          };
+
+          if (before.translation !== after.translation) {
+            changed += 1;
+          }
+
+          const importedTranslation = after.translation || "";
+          const trimmed = importedTranslation.trim();
+          if (!trimmed.length && before.original.trim().length > 0) {
+            missingCount += 1;
+            addDetail("missing_translation", detail);
+          }
+          if (importedTranslation.includes("\n") || importedTranslation.includes("\r")) {
+            newlineCount += 1;
+            addDetail("line_breaks", detail);
+          }
+          if (trimmed.length > 0 && trimmed === before.original.trim()) {
+            sameAsOriginalCount += 1;
+            addDetail("same_as_original", detail);
+          }
+          if (importedTranslation.length > 0 && importedTranslation !== trimmed) {
+            leadingTrailingCount += 1;
+            addDetail("leading_trailing_spaces", detail);
+          }
+        }
+
+        if (missingCount > 0) {
+          pushIssue("missing_translation", `Missing translations: ${missingCount}`, "warn");
+        }
+        if (newlineCount > 0) {
+          pushIssue("line_breaks", `Line breaks in translation: ${newlineCount}`, "warn");
+        }
+        if (sameAsOriginalCount > 0) {
+          pushIssue("same_as_original", `Same as original: ${sameAsOriginalCount}`, "warn");
+        }
+        if (leadingTrailingCount > 0) {
+          pushIssue("leading_trailing_spaces", `Leading or trailing spaces: ${leadingTrailingCount}`, "warn");
+        }
+        if (changed === 0) {
+          pushIssue("no_changes", "No changes after import", "warn");
+        }
+
+        nextDiagnostics[row.project.id] = {
+          analyzed: true,
+          changed,
+          matched: result.matched,
+          total: result.total,
+          method: result.method,
+          issues,
+          issueDetailsByCode,
+        };
+      } catch (error) {
+        pushIssue("read_failed", "Failed to read import file", "error");
+        nextDiagnostics[row.project.id] = {
+          analyzed: true,
+          changed: 0,
+          matched: 0,
+          total: row.project.entries.length,
+          method: "",
+          issues,
+          issueDetailsByCode,
+          error: String(error),
+        };
+      }
+    }
+
+    setImportDiagnosticsByProject(nextDiagnostics);
+    setImportDiagnosticsBusy(false);
+  }, [importDialogOpen, importPreviewRows, assignedPathOwners]);
+
+  useEffect(() => {
+    if (!importDialogOpen) return;
+    if (!importPaths.length) {
+      setImportDiagnosticsByProject({});
+      setImportDiagnosticsBusy(false);
+      return;
+    }
+
+    const t = window.setTimeout(() => {
+      void analyzeImportAssignments();
+    }, 120);
+
+    return () => window.clearTimeout(t);
+  }, [importDialogOpen, importPaths, importAssignmentSignature, analyzeImportAssignments]);
+
   async function importTranslationWithSettings() {
     if (!projects.length || !importPaths.length) return;
     setImportBusy(true);
 
-    const importLookup = buildImportLookup(importPaths);
-    const importTargets = projects
-      .filter((project) => project.entries.length > 0)
-      .map((project) => ({
-        project,
-        importPath: resolveImportForProject(project, importLookup),
-      }))
-      .filter((item): item is { project: StudioProject; importPath: string } => !!item.importPath);
+    const importTargets = importPreviewRows
+      .filter((row) => row.assignedPath)
+      .map((row) => ({
+        project: row.project,
+        importPath: row.assignedPath as string,
+      }));
 
     if (!importTargets.length) {
       setImportBusy(false);
@@ -1560,7 +2099,7 @@ function dismissUpdateDialog() {
 
       setProjects(updatedProjects);
       setImportDialogOpen(false);
-      const importableProjectCount = projects.filter((project) => project.entries.length > 0).length;
+      const importableProjectCount = importableProjects.length;
       const unmatched = Math.max(0, importableProjectCount - importTargets.length);
       setStatus(
         unmatched > 0
@@ -1571,6 +2110,8 @@ function dismissUpdateDialog() {
       setStatus(`Import failed: ${String(error)}`);
     } finally {
       setImportBusy(false);
+      setImportDragPayload(null);
+      setImportDropTargetId(null);
       setImportProgressState({
         active: false,
         stage: "",
@@ -1707,6 +2248,18 @@ function dismissUpdateDialog() {
             <div className="project-load-meta">{projectLoadPercent}%</div>
           </div>
         </div>
+      )}
+
+      {viewMode === "manager" && (
+        <button
+          className="btn update-corner-btn"
+          onClick={() => void checkForUpdates(true)}
+          disabled={busy || updateChecking}
+          title="Check for updates"
+        >
+          {Ico.reset}
+          {updateChecking ? "Checking..." : "Check for updates"}
+        </button>
       )}
 
       {viewMode === "manager" ? (
@@ -2142,6 +2695,133 @@ function dismissUpdateDialog() {
             </div>
 
             <div className="import-modal-section">
+              <div className="import-section-title">Auto matching and drag reorder</div>
+              <div className="import-issue-hint">
+                Files are auto-matched by filename. Drag rows to swap assigned files, or use the dropdown per row.
+              </div>
+
+              {importPreviewRows.length > 0 && (
+                <div className="import-match-list">
+                  {importPreviewRows.map((row) => {
+                    const diagnostics = importDiagnosticsByProject[row.project.id];
+                    const hasError = !!diagnostics?.issues.some((issue) => issue.severity === "error");
+                    const hasWarn = !!diagnostics?.issues.some((issue) => issue.severity === "warn");
+                    const rowCls = hasError
+                      ? " has-error"
+                      : hasWarn
+                        ? " has-warn"
+                        : "";
+
+                    return (
+                      <div
+                        key={row.project.id}
+                        className={`import-match-row${rowCls}${importDropTargetId === row.project.id ? " drop-target" : ""}`}
+                        draggable={!importBusy}
+                        onDragStart={(e) => handleImportProjectDragStart(row.project.id, e)}
+                        onDragEnd={() => {
+                          setImportDragPayload(null);
+                          setImportDropTargetId(null);
+                        }}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          setImportDropTargetId(row.project.id);
+                        }}
+                        onDragLeave={() => setImportDropTargetId((prev) => (prev === row.project.id ? null : prev))}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          handleImportDropOnProject(row.project.id, e);
+                          setImportDragPayload(null);
+                          setImportDropTargetId(null);
+                        }}
+                      >
+                        <div className="import-match-main">
+                          <div className="import-match-project">{Ico.drag} {row.projectName}</div>
+                          <div className="import-match-arrow">→</div>
+                          <div className={`import-match-file${row.assignedPath ? "" : " unassigned"}`}>
+                            {row.assignedPath ? getDisplayFileName(row.assignedPath) : "Not matched"}
+                          </div>
+                        </div>
+
+                        <div className="import-match-controls">
+                          <select
+                            className="import-row-select"
+                            value={row.assignedPath ?? ""}
+                            disabled={importBusy}
+                            onChange={(e) => {
+                              const value = e.target.value.trim();
+                              assignImportPathToProject(row.project.id, value.length ? value : null);
+                            }}
+                          >
+                            <option value="">Not matched</option>
+                            {importPaths.map((path) => (
+                              <option key={`${row.project.id}-${path}`} value={path}>
+                                {getDisplayFileName(path)}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="mini-btn"
+                            disabled={importBusy || !row.autoPath}
+                            onClick={() => assignImportPathToProject(row.project.id, row.autoPath)}
+                          >
+                            Auto
+                          </button>
+                          <button
+                            type="button"
+                            className="mini-btn"
+                            disabled={importBusy || !row.assignedPath}
+                            onClick={() => assignImportPathToProject(row.project.id, null)}
+                          >
+                            Clear
+                          </button>
+                        </div>
+
+                        <div className="import-match-meta">
+                          <span className="import-method-tag">
+                            auto: {row.autoPath ? getDisplayFileName(row.autoPath) : "none"}
+                          </span>
+                          {diagnostics?.analyzed && (
+                            <span className="import-method-tag">
+                              {diagnostics.method ? diagnostics.method : "analysis"} | changes: {diagnostics.changed}
+                            </span>
+                          )}
+                        </div>
+
+                        {diagnostics?.issues.length ? (
+                          <div className="import-issue-row">
+                            {diagnostics.issues.map((issue, idx) => (
+                              <button
+                                key={`${row.project.id}-issue-${idx}`}
+                                type="button"
+                                className={`import-issue-pill ${issue.severity}`}
+                                onClick={() => setImportInspectorState({ projectId: row.project.id, issueCode: issue.code })}
+                              >
+                                {issue.label}
+                              </button>
+                            ))}
+                          </div>
+                        ) : diagnostics?.analyzed ? (
+                          <div className="import-issue-row">
+                            <span className="import-issue-pill ok">No issues found</span>
+                          </div>
+                        ) : null}
+
+                        {diagnostics?.error && (
+                          <div className="import-issue-hint">{diagnostics.error}</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {importDiagnosticsBusy && (
+                <div className="import-issue-hint">Analyzing import files...</div>
+              )}
+            </div>
+
+            <div className="import-modal-section">
               <div className="import-section-title">Merge behavior</div>
               <label className="checkbox-row">
                 <input
@@ -2226,15 +2906,65 @@ function dismissUpdateDialog() {
               >
                 {Ico.reset} Reset Defaults
               </button>
+              <button className="btn" onClick={() => void analyzeImportAssignments()} disabled={importBusy || !importPaths.length || importDiagnosticsBusy}>
+                {Ico.review} {importDiagnosticsBusy ? "Analyzing..." : "Recheck Issues"}
+              </button>
               <button className="btn" onClick={() => setImportDialogOpen(false)} disabled={importBusy}>Cancel</button>
               <button
                 className="btn primary"
                 onClick={() => void importTranslationWithSettings()}
-                disabled={importBusy || !importPaths.length || (!importSettings.importVoice && !importSettings.importNarration && !importSettings.importChoice)}
+                disabled={importBusy || !importPaths.length || !importPreviewRows.some((row) => !!row.assignedPath) || (!importSettings.importVoice && !importSettings.importNarration && !importSettings.importChoice)}
               >
                 {Ico.import} {importBusy ? "Importing..." : "Start Import"}
               </button>
             </div>
+
+            {importInspectorView && (
+              <div className="import-inspector-backdrop" onClick={() => setImportInspectorState(null)}>
+                <div className="import-inspector-card" onClick={(e) => e.stopPropagation()}>
+                  <div className="import-inspector-head">
+                    <div>
+                      <div className="import-section-title">Issue Inspector</div>
+                      <div className="import-issue-hint">
+                        {importInspectorView.row.projectName} | {importInspectorView.issueLabel}
+                      </div>
+                    </div>
+                    <button type="button" className="mini-btn" onClick={() => setImportInspectorState(null)}>
+                      Close
+                    </button>
+                  </div>
+
+                  {importInspectorView.details.length ? (
+                    <div className="import-inspector-list">
+                      {importInspectorView.details.map((detail) => (
+                        <div key={`${detail.entryId}-${detail.lineNo}-${detail.type}`} className="import-inspector-entry">
+                          <div className="import-inspector-meta">
+                            #{detail.entryId} | line {detail.lineNo} | {detail.type}
+                            {detail.speaker ? ` | ${detail.speaker}` : ""}
+                          </div>
+                          <div className="import-inspector-grid">
+                            <div>
+                              <div className="import-modal-label">Original</div>
+                              <pre className="import-inspector-text">{formatInspectorValue(detail.original)}</pre>
+                            </div>
+                            <div>
+                              <div className="import-modal-label">Current translation</div>
+                              <pre className="import-inspector-text">{formatInspectorValue(detail.currentTranslation)}</pre>
+                            </div>
+                            <div>
+                              <div className="import-modal-label">Imported value</div>
+                              <pre className="import-inspector-text">{formatInspectorValue(detail.importedTranslation)}</pre>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="import-issue-hint">No line-level details for this issue. It applies to the file mapping state.</div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

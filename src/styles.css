@@ -399,6 +399,23 @@ html, body {
 .btn.btn-done { background: rgba(78,201,123,0.15); border-color: var(--green); color: var(--green); }
 .btn.btn-done:hover:not(:disabled) { background: rgba(78,201,123,0.25); }
 
+.update-corner-btn {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 120;
+  width: auto;
+  min-width: 0;
+  justify-content: center;
+  background: rgba(30, 30, 38, 0.92);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.32);
+}
+
+.update-corner-btn:hover:not(:disabled) {
+  background: rgba(38, 38, 47, 0.95);
+}
+
 #toolbar-right {
   margin-top: auto;
   display: flex;
@@ -672,6 +689,13 @@ html, body {
 @media (max-width: 1080px) {
   .app {
     flex-direction: column;
+  }
+
+  .update-corner-btn {
+    top: 8px;
+    right: 8px;
+    padding: 5px 8px;
+    font-size: 11px;
   }
 
   #toolbar {
@@ -1061,6 +1085,257 @@ td.col-type .tag {
   gap: 8px;
 }
 
+.import-file-pool {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.import-file-chip {
+  border: 1px solid var(--border2);
+  background: var(--bg3);
+  color: var(--fg2);
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: grab;
+}
+
+.import-file-chip.unassigned {
+  border-color: var(--orange);
+  color: var(--orange);
+  background: rgba(232, 162, 79, 0.12);
+}
+
+.import-match-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 38vh;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.import-match-row {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg3);
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  cursor: grab;
+}
+
+.import-match-row.drop-target {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(124, 106, 247, 0.25) inset;
+}
+
+.import-match-row.has-warn {
+  border-color: rgba(232, 162, 79, 0.65);
+}
+
+.import-match-row.has-error {
+  border-color: rgba(240, 113, 120, 0.75);
+}
+
+.import-match-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.import-match-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.import-row-select {
+  width: 100%;
+  min-width: 120px;
+  border: 1px solid var(--border2);
+  background: var(--bg2);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  outline: none;
+}
+
+.import-row-select:focus {
+  border-color: var(--accent);
+}
+
+.import-match-project,
+.import-match-file {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+}
+
+.import-match-project {
+  color: var(--fg);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.import-match-file {
+  color: var(--cyan);
+}
+
+.import-match-file.unassigned {
+  color: var(--red);
+}
+
+.import-match-arrow {
+  color: var(--fg3);
+  font-size: 11px;
+}
+
+.import-match-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.import-method-tag {
+  border: 1px solid var(--border2);
+  border-radius: 999px;
+  padding: 3px 8px;
+  color: var(--fg3);
+  font-size: 10px;
+}
+
+.import-issue-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.import-issue-pill {
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 10px;
+  border: 1px solid var(--border2);
+  background: transparent;
+  font-family: 'JetBrains Mono', monospace;
+  cursor: pointer;
+}
+
+.import-issue-pill:hover {
+  filter: brightness(1.06);
+}
+
+.import-issue-pill.warn {
+  color: var(--orange);
+  border-color: rgba(232, 162, 79, 0.65);
+  background: rgba(232, 162, 79, 0.12);
+}
+
+.import-issue-pill.error {
+  color: var(--red);
+  border-color: rgba(240, 113, 120, 0.75);
+  background: rgba(240, 113, 120, 0.12);
+}
+
+.import-issue-pill.ok {
+  color: var(--green);
+  border-color: rgba(78, 201, 123, 0.65);
+  background: rgba(78, 201, 123, 0.12);
+}
+
+.import-issue-hint {
+  color: var(--fg3);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.import-inspector-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.52);
+  z-index: 340;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+}
+
+.import-inspector-card {
+  width: min(980px, 96vw);
+  max-height: 84vh;
+  overflow: auto;
+  border: 1px solid var(--border2);
+  border-radius: 10px;
+  background: var(--bg2);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.import-inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.import-inspector-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.import-inspector-entry {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg3);
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.import-inspector-meta {
+  color: var(--fg2);
+  font-size: 11px;
+}
+
+.import-inspector-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.import-inspector-text {
+  margin-top: 4px;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  background: var(--bg2);
+  color: var(--fg);
+  padding: 7px 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 140px;
+  overflow: auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
 .import-progress-stage {
   color: var(--fg2);
   font-size: 11px;
@@ -1131,6 +1406,23 @@ td.col-type .tag {
 
   .import-type-grid {
     grid-template-columns: 1fr;
+  }
+
+  .import-match-main {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .import-match-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .import-inspector-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .import-match-arrow {
+    display: none;
   }
 
   .import-modal-actions {

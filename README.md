@@ -2,7 +2,7 @@
 
 **Next-generation rewrite** of NPSTranslationTool with a scalable architecture for future extensibility.
 
-Current version: 2.0.0
+Current version: 2.1.0
 
 - **Frontend**: React + TypeScript + Vite with GitHub-style dark UI
 - **Core logic**: Rust (Tauri commands)
@@ -94,12 +94,12 @@ Outputs:
 
 The repository includes a GitHub Actions workflow (`.github/workflows/build.yml`) that:
 - Triggers on `push` to `main` and `dev` branches
-- Triggers on tags matching `v*` (e.g., `v2.0.0`)
+- Triggers on tags matching `v*` (e.g., `v2.1.0`)
 - Builds for Windows, Linux, and macOS in parallel
 - Creates releases with artifacts when tagging
 
 ### To Enable Releases:
-1. Push a tag: `git tag v2.0.0 && git push origin v2.0.0`
+1. Push a tag: `git tag v2.1.0 && git push origin v2.1.0`
 2. GitHub Actions will automatically build and create a release
 
 ## Auto-Update Configuration
@@ -126,12 +126,12 @@ Auto-update is wired in code. To enable it for GitHub Releases:
 3. **Generate release metadata** (`latest.json`) in your release:
    ```json
    {
-     "version": "2.0.0",
-     "notes": "Release 2.0.0",
+    "version": "2.1.0",
+    "notes": "Release 2.1.0",
      "pub_date": "2026-06-10T00:00:00Z",
      "platforms": {
        "windows-x86_64": {
-         "url": "https://github.com/DivanDoge/Locus-Studio-Next/releases/download/v2.0.0/nps_studio_next-setup.exe",
+         "url": "https://github.com/DivanDoge/Locus-Studio-Next/releases/download/v2.1.0/nps_studio_next-setup.exe",
          "signature": "SIGNATURE_HERE"
        }
      }
