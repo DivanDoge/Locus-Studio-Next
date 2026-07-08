@@ -1527,7 +1527,10 @@ async function startUpdateDownload() {
     setUpdateStatus("Update downloaded. Restart to apply.");
   } catch (e) {
     console.error("Update download error:", e);
-    const message = e instanceof Error ? e.message : String(e);
+    const rawMessage = e instanceof Error ? e.message : String(e);
+    const message = /404/.test(rawMessage)
+      ? "Update artifact URL not found (404). The release manifest points to a missing file. Publish a new release with regenerated latest.json."
+      : rawMessage;
     setUpdateError(message);
     setUpdateStatus(`Update failed: ${message}`);
     setStatus(`Update failed: ${message}`);

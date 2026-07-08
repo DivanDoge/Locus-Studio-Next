@@ -19,7 +19,9 @@ def read_sig(path: Path) -> str:
 
 
 def asset_url(path: Path, repo: str, tag: str) -> str:
-    encoded_name = quote(path.name)
+    # GitHub release asset names normalize spaces to dots in final URLs.
+    normalized_name = path.name.replace(" ", ".")
+    encoded_name = quote(normalized_name)
     return f"https://github.com/{repo}/releases/download/{tag}/{encoded_name}"
 
 
