@@ -345,6 +345,13 @@ function getTranslationProgress(entries: Entry[]) {
   return { total, done, percent };
 }
 
+function getApprovalProgress(entries: Entry[]) {
+  const total = entries.length;
+  const approved = entries.filter((entry) => !!entry.approved).length;
+  const approvedPercent = total ? Math.round((approved / total) * 100) : 0;
+  return { approved, approvedPercent };
+}
+
 function getFileName(path: string): string {
   const parts = path.split(/[\\/]/);
   return (parts[parts.length - 1] || path).toLowerCase();
@@ -517,6 +524,8 @@ function App() {
   const [updateReadyToRestart, setUpdateReadyToRestart] = useState(false);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateError, setUpdateError] = useState("");
+  const [updateStatus, setUpdateStatus] = useState("Idle");
+  const [lastUpdateCheckAt, setLastUpdateCheckAt] = useState<string>("Never");
   const [startupVisible, setStartupVisible] = useState(() => isSplashWindow);
   const [startupProgress, setStartupProgress] = useState(0);
   const [startupStage, setStartupStage] = useState("Initializing modules...");
@@ -525,6 +534,9 @@ function App() {
   const [workspace, setWorkspace] = useState<StudioProjectInfo | null>(null);
   const [viewMode, setViewMode] = useState<"manager" | "studio">("manager");
   const [recentProjectPaths, setRecentProjectPaths] = useState<string[]>(() => loadRecentProjectPaths());
+  const [recentProjectSearch, setRecentProjectSearch] = useState("");
+  const [recentProjectSort, setRecentProjectSort] = useState<"recent" | "name">("recent");
+  const [managerProjectSearch, setManagerProjectSearch] = useState("");
   const [status, setStatus] = useState("Open or create a project folder to begin");
   const [fileListSearch, setFileListSearch] = useState("");
   const [busy, setBusy] = useState(false);
@@ -717,12 +729,14 @@ function App() {
     return projects
       .map((project) => {
         const progressStats = getTranslationProgress(project.entries);
+        const approvalStats = getApprovalProgress(project.entries);
         return {
           id: project.id,
           title: getProjectDisplayName(project),
           sourcePath: project.sourcePath,
           jsonPath: project.jsonPath,
           ...progressStats,
+          ...approvalStats,
         };
       })
       .sort((a, b) => a.title.localeCompare(b.title));
@@ -734,6 +748,34 @@ function App() {
     return projectFileRows.filter((row) => row.title.toLowerCase().includes(query));
   }, [projectFileRows, fileListSearch]);
 
+  const filteredRecentProjectPaths = useMemo(() => {
+    const query = recentProjectSearch.trim().toLowerCase();
+    if (!query) return recentProjectPaths;
+    return recentProjectPaths.filter((projectPath) => projectPath.toLowerCase().includes(query));
+  }, [recentProjectPaths, recentProjectSearch]);
+
+  const sortedRecentProjectPaths = useMemo(() => {
+    if (recentProjectSort === "recent") return filteredRecentProjectPaths;
+    return [...filteredRecentProjectPaths].sort((a, b) => {
+      const aa = (a.split(/[\\/]/).pop() || a).toLowerCase();
+      const bb = (b.split(/[\\/]/).pop() || b).toLowerCase();
+      return aa.localeCompare(bb);
+    });
+  }, [filteredRecentProjectPaths, recentProjectSort]);
+
+  const visibleRecentProjectPaths = useMemo(
+    () => sortedRecentProjectPaths.slice(0, 4),
+    [sortedRecentProjectPaths]
+  );
+
+  const hiddenRecentProjectCount = Math.max(0, sortedRecentProjectPaths.length - visibleRecentProjectPaths.length);
+
+  const managerProjectRows = useMemo(() => {
+    const query = managerProjectSearch.trim().toLowerCase();
+    if (!query) return projectFileRows;
+    return projectFileRows.filter((row) => row.title.toLowerCase().includes(query));
+  }, [projectFileRows, managerProjectSearch]);
+
   const workspaceProgress = useMemo(() => {
     const total = projects.reduce((sum, project) => sum + project.entries.length, 0);
     const done = projects.reduce(
@@ -742,6 +784,16 @@ function App() {
     );
     const percent = total ? Math.round((done / total) * 100) : 0;
     return { total, done, percent };
+  }, [projects]);
+
+  const workspaceApprovalProgress = useMemo(() => {
+    const total = projects.reduce((sum, project) => sum + project.entries.length, 0);
+    const approved = projects.reduce(
+      (sum, project) => sum + project.entries.filter((entry) => !!entry.approved).length,
+      0
+    );
+    const percent = total ? Math.round((approved / total) * 100) : 0;
+    return { total, approved, percent };
   }, [projects]);
 
   const knownSpeakers = useMemo(() => {
@@ -1409,11 +1461,13 @@ const checkForUpdates = useCallback(async (manual: boolean) => {
   updateCheckInFlightRef.current = true;
   setUpdateChecking(true);
   setUpdateError("");
+  setUpdateStatus("Checking for updates...");
   try {
     const update = await check();
     console.log("Update check result:", update);
     if (!update) {
       if (manual) setStatus("You are using the latest version.");
+      setUpdateStatus("You are using the latest version.");
       return;
     }
 
@@ -1422,11 +1476,14 @@ const checkForUpdates = useCallback(async (manual: boolean) => {
     setUpdateDownloading(false);
     setUpdateReadyToRestart(false);
     setUpdateDialogOpen(true);
+    setUpdateStatus(`Update available: v${update.version}`);
     if (manual) setStatus(`Update available: v${update.version}`);
   } catch (e) {
     console.error("Update check failed:", e);
+    setUpdateStatus(`Update check failed: ${String(e)}`);
     if (manual) setStatus(`Update check failed: ${String(e)}`);
   } finally {
+    setLastUpdateCheckAt(new Date().toLocaleTimeString());
     updateCheckInFlightRef.current = false;
     setUpdateChecking(false);
   }
@@ -1442,12 +1499,14 @@ async function startUpdateDownload() {
   setUpdateError("");
   setUpdateReadyToRestart(false);
   setUpdateDownloading(true);
+  setUpdateStatus("Downloading update...");
   setUpdateProgress({ downloaded: 0, total: 0 });
   try {
     // Get a fresh update handle right before download to avoid stale handles after long idle time.
     const freshUpdate = await check();
     if (!freshUpdate) {
       setStatus("No update found. You may already be on the latest version.");
+      setUpdateStatus("No update found. You may already be on the latest version.");
       setUpdateDownloading(false);
       return;
     }
@@ -1465,10 +1524,12 @@ async function startUpdateDownload() {
     });
     console.log("downloadAndInstall finished");
     setStatus("Update downloaded. Restart to apply.");
+    setUpdateStatus("Update downloaded. Restart to apply.");
   } catch (e) {
     console.error("Update download error:", e);
     const message = e instanceof Error ? e.message : String(e);
     setUpdateError(message);
+    setUpdateStatus(`Update failed: ${message}`);
     setStatus(`Update failed: ${message}`);
   } finally {
     setUpdateDownloading(false);
@@ -1650,6 +1711,8 @@ function dismissUpdateDialog() {
   }
 
   function removeRecentProject(path: string) {
+    const label = path.split(/[\\/]/).pop() || path;
+    if (!window.confirm(`Remove "${label}" from recent projects?`)) return;
     setRecentProjectPaths((prev) => prev.filter((p) => p !== path));
   }
 
@@ -2266,53 +2329,171 @@ function dismissUpdateDialog() {
         </div>
       )}
 
-      {viewMode === "manager" && (
-        <button
-          className="btn update-corner-btn"
-          onClick={() => void checkForUpdates(true)}
-          disabled={busy || updateChecking}
-          title="Check for updates"
-        >
-          {Ico.reset}
-          {updateChecking ? "Checking..." : "Check for updates"}
-        </button>
-      )}
-
       {viewMode === "manager" ? (
         <div className="project-manager-screen">
-          <div className="project-manager-card">
-            <h1 className="project-manager-title">Locus Studio Next</h1>
-            <p className="project-manager-subtitle">Project Manager</p>
-            <div className="project-manager-actions">
-              <button className="btn primary" onClick={() => void openWorkspaceProject()} disabled={busy}>{Ico.folder} Open Project Folder</button>
-              <button className="btn" onClick={() => void createWorkspaceProject()} disabled={busy}>{Ico.plus} Create New Project</button>
-              {workspace && (
-                <button className="btn" onClick={() => setViewMode("studio")} disabled={busy}>Continue Project</button>
+          <div className="project-manager-card project-manager-card-wide">
+            <div className="project-manager-header">
+              <div className="project-manager-brand">
+                <h1 className="project-manager-title">Locus Studio Next</h1>
+                <p className="project-manager-subtitle">Project Manager</p>
+              </div>
+              <div className="project-manager-actions">
+                <button className="btn primary" onClick={() => void openWorkspaceProject()} disabled={busy}>{Ico.folder} Open Project Folder</button>
+                <button className="btn" onClick={() => void createWorkspaceProject()} disabled={busy}>{Ico.plus} Create New Project</button>
+                {workspace && (
+                  <button className="btn" onClick={() => setViewMode("studio")} disabled={busy}>Continue Project</button>
+                )}
+              </div>
+            </div>
+
+            <div className="project-manager-hero-grid">
+              <div className="project-manager-section project-manager-section-current">
+                <div className="project-manager-section-head">
+                  <div className="project-manager-section-title">Current Project</div>
+                  <div className="project-manager-section-note">Workspace overview</div>
+                </div>
+                {workspace ? (
+                  <>
+                    <button className="project-manager-current-name" onClick={() => setViewMode("studio")} title={workspace.path}>
+                      {workspace.name}
+                    </button>
+                    <div className="project-manager-metric-grid">
+                      <div className="project-manager-metric">
+                        <span className="project-manager-metric-label">Files</span>
+                        <span className="project-manager-metric-value">{projects.length}</span>
+                      </div>
+                      <div className="project-manager-metric">
+                        <span className="project-manager-metric-label">Translated</span>
+                        <span className="project-manager-metric-value">{workspaceProgress.percent}%</span>
+                      </div>
+                      <div className="project-manager-metric">
+                        <span className="project-manager-metric-label">Approved</span>
+                        <span className="project-manager-metric-value">{workspaceApprovalProgress.percent}%</span>
+                      </div>
+                      <div className="project-manager-metric">
+                        <span className="project-manager-metric-label">Unsaved</span>
+                        <span className="project-manager-metric-value">{dirtyProjectCount}</span>
+                      </div>
+                    </div>
+                    <div className="project-manager-hero-status">
+                      {workspaceProgress.done}/{workspaceProgress.total} translated, {workspaceApprovalProgress.approved}/{workspaceApprovalProgress.total} approved
+                    </div>
+                  </>
+                ) : (
+                  <div className="project-manager-empty">Open or create a project to start managing files and progress.</div>
+                )}
+              </div>
+
+              <div className="project-manager-section project-manager-section-updates">
+                <div className="project-manager-section-head">
+                  <div className="project-manager-section-title">Updates</div>
+                  <button className="btn" onClick={() => void checkForUpdates(true)} disabled={busy || updateChecking}>
+                    {Ico.reset} {updateChecking ? "Checking..." : "Check now"}
+                  </button>
+                </div>
+                <div className="project-manager-update-meta">
+                  <span>Current: {appVersion ? `v${appVersion}` : "unknown"}</span>
+                  <span>Last check: {lastUpdateCheckAt}</span>
+                </div>
+                <div className="project-manager-update-status" title={updateStatus}>{updateStatus}</div>
+                {!!updateError && <div className="project-manager-update-error">{updateError}</div>}
+              </div>
+            </div>
+
+            <div className="project-manager-section project-manager-files-section">
+              <div className="project-manager-section-head">
+                <div className="project-manager-section-title">File Manager</div>
+                {workspace && <div className="project-manager-section-note">{managerProjectRows.length} shown</div>}
+              </div>
+
+              {workspace ? (
+                <>
+                  <div className="project-manager-controls-row">
+                    <button className="btn" onClick={openProject} disabled={busy}>{Ico.folder} Add Files</button>
+                    <button className="btn" onClick={quickSave} disabled={!projects.length || busy || dirtyProjectCount === 0}>{Ico.save} Quick Save</button>
+                    <button className="btn" onClick={() => setViewMode("studio")} disabled={busy}>Open Studio</button>
+                  </div>
+                  <input
+                    className="project-manager-search"
+                    value={managerProjectSearch}
+                    onChange={(e) => setManagerProjectSearch(e.target.value)}
+                    placeholder="Search files in current project..."
+                  />
+                  {managerProjectRows.length === 0 ? (
+                    <div className="project-manager-empty">No files match this filter.</div>
+                  ) : (
+                    <div className="project-manager-file-list">
+                      {managerProjectRows.map((row) => (
+                        <div className="project-manager-item project-manager-item-stack" key={row.id}>
+                          <div className="project-manager-item-row">
+                            <button
+                              className="project-manager-item-main"
+                              onClick={() => {
+                                setActiveProjectId(row.id);
+                                setViewMode("studio");
+                              }}
+                              title={row.sourcePath || row.jsonPath || row.title}
+                            >
+                              {row.title}
+                            </button>
+                            <button className="project-manager-item-close" onClick={() => closeFileTab(row.id)} title="Remove file from workspace">✕</button>
+                          </div>
+                          <div className="project-manager-progress-wrap">
+                            <div className="project-manager-progress-row">
+                              <span>{row.done}/{row.total} translated</span>
+                              <span>{row.percent}%</span>
+                            </div>
+                            <div className="project-manager-progress-track">
+                              <div className="project-manager-progress-fill translation" style={{ width: `${row.percent}%` }} />
+                            </div>
+                            <div className="project-manager-progress-row">
+                              <span>{row.approved}/{row.total} approved</span>
+                              <span>{row.approvedPercent}%</span>
+                            </div>
+                            <div className="project-manager-progress-track">
+                              <div className="project-manager-progress-fill approved" style={{ width: `${row.approvedPercent}%` }} />
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <div className="project-manager-empty">No workspace opened yet.</div>
               )}
             </div>
 
-            {workspace && (
-              <div className="project-manager-section">
-                <div className="project-manager-section-title">Current Project</div>
-                <div className="project-manager-item project-manager-item-stack">
-                  <button className="project-manager-item-main" onClick={() => setViewMode("studio")} title={workspace.path}>
-                    {workspace.name}
-                  </button>
-                  <div className="project-manager-meta-row">
-                    <span>{projects.length} files</span>
-                    <span>{workspaceProgress.done}/{workspaceProgress.total} translated ({workspaceProgress.percent}%)</span>
-                  </div>
-                </div>
+            <div className="project-manager-section project-manager-recent-section">
+              <div className="project-manager-section-head">
+                <div className="project-manager-section-title">Recent Projects</div>
+                {recentProjectPaths.length > 0 && <div className="project-manager-section-note">Last opened</div>}
               </div>
-            )}
-
-            <div className="project-manager-section">
-              <div className="project-manager-section-title">Recent Projects</div>
+              {recentProjectPaths.length > 0 && (
+                <div className="project-manager-controls-row">
+                  <input
+                    className="project-manager-search"
+                    value={recentProjectSearch}
+                    onChange={(e) => setRecentProjectSearch(e.target.value)}
+                    placeholder="Filter recent projects..."
+                  />
+                  <select
+                    className="project-manager-sort"
+                    value={recentProjectSort}
+                    onChange={(e) => setRecentProjectSort(e.target.value as "recent" | "name")}
+                  >
+                    <option value="recent">Recent</option>
+                    <option value="name">Name</option>
+                  </select>
+                </div>
+              )}
               {recentProjectPaths.length === 0 ? (
                 <div className="project-manager-empty">No recent projects yet.</div>
+              ) : sortedRecentProjectPaths.length === 0 ? (
+                <div className="project-manager-empty">No recent projects match this filter.</div>
               ) : (
                 <div className="project-manager-list">
-                  {recentProjectPaths.map((path) => {
+                  {visibleRecentProjectPaths.map((path) => {
                     const label = path.split(/[\\/]/).pop() || path;
                     return (
                       <div className="project-manager-item" key={path}>
@@ -2323,12 +2504,10 @@ function dismissUpdateDialog() {
                   })}
                 </div>
               )}
-              </div>
-            {appVersion && (
-              <div style={{ textAlign: "center", paddingTop: "12px", opacity: 0.5, fontSize: "12px" }}>
-                v{appVersion}
-              </div>
-            )}
+              {hiddenRecentProjectCount > 0 && (
+                <div className="project-manager-empty">Showing first {visibleRecentProjectPaths.length} recent projects. Refine the filter to find others.</div>
+              )}
+            </div>
           </div>
         </div>
       ) : (

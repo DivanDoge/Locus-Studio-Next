@@ -399,23 +399,6 @@ html, body {
 .btn.btn-done { background: rgba(78,201,123,0.15); border-color: var(--green); color: var(--green); }
 .btn.btn-done:hover:not(:disabled) { background: rgba(78,201,123,0.25); }
 
-.update-corner-btn {
-  position: fixed;
-  top: 10px;
-  right: 10px;
-  z-index: 120;
-  width: auto;
-  min-width: 0;
-  justify-content: center;
-  background: rgba(30, 30, 38, 0.92);
-  backdrop-filter: blur(4px);
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.32);
-}
-
-.update-corner-btn:hover:not(:disabled) {
-  background: rgba(38, 38, 47, 0.95);
-}
-
 #toolbar-right {
   margin-top: auto;
   display: flex;
@@ -488,64 +471,229 @@ html, body {
   width: 100%;
   height: 100%;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   background:
     radial-gradient(circle at 10% 10%, rgba(124,106,247,0.14), transparent 45%),
     radial-gradient(circle at 90% 90%, rgba(90,156,248,0.12), transparent 40%),
     var(--bg);
-  padding: 24px;
+  padding: 20px;
+  overflow: hidden;
 }
 
 .project-manager-card {
-  width: min(900px, 96vw);
-  max-height: 92vh;
-  overflow: auto;
+  width: min(1180px, 100%);
+  height: calc(100vh - 40px);
+  max-height: calc(100vh - 40px);
+  overflow: hidden;
   border: 1px solid var(--border2);
-  border-radius: 14px;
+  border-radius: 18px;
   background: rgba(22,22,28,0.94);
-  box-shadow: 0 18px 44px rgba(0,0,0,0.45);
+  box-shadow: 0 20px 50px rgba(0,0,0,0.5);
   padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 12px;
+}
+
+.project-manager-card-wide {
+  min-height: 0;
+}
+
+.project-manager-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+
+.project-manager-brand {
+  min-width: 0;
+}
+
+.project-manager-hero-grid {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 12px;
 }
 
 .project-manager-title {
   font-family: 'Unbounded', sans-serif;
-  font-size: 20px;
+  font-size: 21px;
   color: var(--fg);
 }
 
 .project-manager-subtitle {
-  color: var(--accent2);
-  font-size: 12px;
-  letter-spacing: 0.12em;
+  color: var(--fg3);
+  font-size: 11px;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
+  margin-top: 3px;
 }
 
 .project-manager-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .project-manager-actions .btn {
   width: auto;
 }
 
-.project-manager-section {
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
+.project-manager-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.project-manager-controls-row .btn {
+  width: auto;
+}
+
+.project-manager-file-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 4px 2px 0;
+  align-content: start;
+  overscroll-behavior: contain;
+}
+
+.project-manager-files-section {
+  flex: 1;
+  min-height: 0;
+}
+
+.project-manager-section-current,
+.project-manager-section-updates {
+  min-height: 0;
+}
+
+.project-manager-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.project-manager-section-note {
+  color: var(--fg3);
+  font-size: 11px;
+}
+
+.project-manager-current-name {
+  width: 100%;
+  border: 1px solid var(--border2);
+  background: rgba(255,255,255,0.02);
+  border-radius: 10px;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+  padding: 10px 11px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-manager-current-name:hover {
+  border-color: var(--accent);
+  background: rgba(124,106,247,0.12);
+}
+
+.project-manager-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.project-manager-metric {
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: rgba(255,255,255,0.02);
+  padding: 7px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.project-manager-metric-label {
+  color: var(--fg3);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.project-manager-metric-value {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.project-manager-hero-status {
+  color: var(--fg2);
+  font-size: 12px;
+}
+
+.project-manager-item-row {
+  display: flex;
+  align-items: stretch;
+}
+
+.project-manager-update-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(124,106,247,0.08), rgba(124,106,247,0.02));
+  padding: 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+.project-manager-update-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--fg2);
+  flex-wrap: wrap;
+}
+
+.project-manager-update-status {
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  background: var(--bg3);
+  color: var(--fg);
+  font-size: 12px;
+  padding: 7px 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.project-manager-section {
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: rgba(30, 30, 40, 0.32);
+  padding: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
 .project-manager-section-title {
   color: var(--fg2);
   font-size: 11px;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
@@ -554,24 +702,90 @@ html, body {
   font-size: 12px;
 }
 
+.project-manager-search {
+  width: 100%;
+  min-width: 180px;
+  background: rgba(0,0,0,0.2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--fg);
+  padding: 7px 9px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  outline: none;
+}
+
+.project-manager-controls-row .project-manager-search {
+  flex: 1;
+}
+
+.project-manager-search:focus {
+  border-color: var(--accent);
+}
+
+.project-manager-sort {
+  width: auto;
+  min-width: 110px;
+  background: rgba(0,0,0,0.2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--fg);
+  padding: 7px 32px 7px 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--fg2) 50%),
+    linear-gradient(135deg, var(--fg2) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) calc(50% - 2px),
+    calc(100% - 9px) calc(50% - 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+  transition: border-color 120ms ease, box-shadow 120ms ease, background-color 120ms ease;
+}
+
+.project-manager-sort:hover {
+  border-color: var(--accent2);
+  background-color: rgba(124,106,247,0.1);
+}
+
+.project-manager-sort:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(124,106,247,0.24);
+}
+
+.project-manager-sort option {
+  background: #1a1d27;
+  color: #e7e9ff;
+  font-weight: 500;
+}
+
 .project-manager-list {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
+  gap: 10px;
 }
 
 .project-manager-item {
   display: flex;
-  align-items: center;
+  align-items: stretch;
   border: 1px solid var(--border2);
   border-radius: 10px;
   overflow: hidden;
-  background: var(--bg3);
+  background: rgba(255,255,255,0.02);
 }
 
 .project-manager-item-stack {
   flex-direction: column;
   align-items: stretch;
+  min-height: 104px;
 }
 
 .project-manager-meta-row {
@@ -584,16 +798,57 @@ html, body {
   color: var(--fg3);
 }
 
+.project-manager-progress-wrap {
+  border-top: 1px solid var(--border);
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(255,255,255,0.01);
+}
+
+.project-manager-progress-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--fg2);
+}
+
+.project-manager-progress-track {
+  width: 100%;
+  height: 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.1);
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+}
+
+.project-manager-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.project-manager-progress-fill.translation {
+  background: linear-gradient(90deg, #2dc26b, #2dbfa0);
+}
+
+.project-manager-progress-fill.approved {
+  background: linear-gradient(90deg, #5a9cf8, #7c6af7);
+}
+
 .project-manager-item-main {
   border: none;
   background: transparent;
   color: var(--fg);
   flex: 1;
   text-align: left;
-  padding: 8px 10px;
+  padding: 11px 10px;
   cursor: pointer;
   font-family: 'JetBrains Mono', monospace;
-  font-size: 12px;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.3;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -608,12 +863,54 @@ html, body {
   border-left: 1px solid var(--border);
   background: transparent;
   color: var(--fg3);
-  padding: 8px 10px;
+  padding: 9px 11px;
   cursor: pointer;
 }
 
 .project-manager-item-close:hover {
   color: var(--red);
+}
+
+.project-manager-section-updates {
+  background: linear-gradient(180deg, rgba(124,106,247,0.16), rgba(124,106,247,0.03));
+}
+
+.project-manager-updates-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.project-manager-updates-head h3 {
+  font-family: 'Unbounded', sans-serif;
+  font-size: 13px;
+  color: var(--fg);
+}
+
+.project-manager-updates-head .btn {
+  width: auto;
+}
+
+.project-manager-recent-section {
+  flex-shrink: 0;
+}
+
+.project-manager-update-error {
+  border: 1px solid rgba(240, 113, 120, 0.5);
+  background: rgba(240, 113, 120, 0.12);
+  color: var(--red);
+  border-radius: 8px;
+  padding: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.project-manager-update-hint {
+  color: var(--fg3);
+  font-size: 11px;
+  line-height: 1.45;
 }
 
 #project-tabs {
@@ -691,11 +988,35 @@ html, body {
     flex-direction: column;
   }
 
-  .update-corner-btn {
-    top: 8px;
-    right: 8px;
-    padding: 5px 8px;
-    font-size: 11px;
+  .project-manager-screen {
+    padding: 12px;
+  }
+
+  .project-manager-card {
+    height: calc(100vh - 24px);
+    max-height: calc(100vh - 24px);
+    padding: 14px;
+  }
+
+  .project-manager-header {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .project-manager-actions {
+    justify-content: flex-start;
+  }
+
+  .project-manager-hero-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .project-manager-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .project-manager-file-list {
+    grid-template-columns: 1fr;
   }
 
   #toolbar {
