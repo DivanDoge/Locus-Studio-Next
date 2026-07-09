@@ -87,6 +87,14 @@ interface ImportPreviewRow {
   assignedPath: string | null;
 }
 
+type SaveTranslationStatus = "new" | "overwrite" | "unchanged";
+
+interface SaveTranslationPreview {
+  file_name: string;
+  out_path: string;
+  status: SaveTranslationStatus;
+}
+
 interface ImportFileDescriptor {
   path: string;
   fileName: string;
@@ -577,6 +585,22 @@ function App() {
     total: 1,
   });
   const [importSettings, setImportSettings] = useState<ImportSettings>(() => loadImportSettings());
+  const [saveTranslationsDialogOpen, setSaveTranslationsDialogOpen] = useState(false);
+  const [saveTranslationsBusy, setSaveTranslationsBusy] = useState(false);
+  const [saveTranslationsRefreshing, setSaveTranslationsRefreshing] = useState(false);
+  const [saveTranslationsByProject, setSaveTranslationsByProject] = useState<Record<string, SaveTranslationPreview>>({});
+  const [saveTranslationsSelection, setSaveTranslationsSelection] = useState<Record<string, boolean>>({});
+  const [saveTranslationsProgressState, setSaveTranslationsProgressState] = useState<{
+    active: boolean;
+    stage: string;
+    current: number;
+    total: number;
+  }>({
+    active: false,
+    stage: "",
+    current: 0,
+    total: 1,
+  });
   const [panels, setPanels] = useState<Record<string, Panel>>(() => {
     try {
       const s = localStorage.getItem("nps-panels");
@@ -828,6 +852,49 @@ function App() {
     [projects]
   );
 
+  const savableProjects = useMemo(
+    () => projects.filter((project) => project.entries.length > 0 && !!project.sourcePath),
+    [projects]
+  );
+
+  const translationsOutputDir = useMemo(() => {
+    if (!workspace) return "";
+    return `${workspace.path.replace(/[\\/]$/, "")}\\translations`;
+  }, [workspace]);
+
+  const saveTranslationRows = useMemo(() => {
+    return savableProjects.map((project) => {
+      const preview = saveTranslationsByProject[project.id] || null;
+      return {
+        project,
+        projectName: getProjectDisplayName(project),
+        sourceName: getDisplayFileName(project.sourcePath),
+        preview,
+        selected: !!saveTranslationsSelection[project.id],
+      };
+    });
+  }, [savableProjects, saveTranslationsByProject, saveTranslationsSelection]);
+
+  const saveTranslationsCounts = useMemo(() => {
+    const counts = { new: 0, overwrite: 0, unchanged: 0, unknown: 0, selected: 0 };
+    for (const row of saveTranslationRows) {
+      if (row.selected) counts.selected += 1;
+      if (!row.preview) {
+        counts.unknown += 1;
+        continue;
+      }
+      if (row.preview.status === "new") counts.new += 1;
+      else if (row.preview.status === "overwrite") counts.overwrite += 1;
+      else counts.unchanged += 1;
+    }
+    return counts;
+  }, [saveTranslationRows]);
+
+  const saveTranslationsProgressPercent = useMemo(() => {
+    if (!saveTranslationsProgressState.total) return 0;
+    return Math.max(0, Math.min(100, Math.round((saveTranslationsProgressState.current / saveTranslationsProgressState.total) * 100)));
+  }, [saveTranslationsProgressState.current, saveTranslationsProgressState.total]);
+
   const autoImportAssignments = useMemo(() => {
     return buildAutoImportAssignments(importableProjects, importPaths);
   }, [importPaths, importableProjects]);
@@ -1011,6 +1078,16 @@ function App() {
       setImportInspectorState(null);
     }
   }, [importDialogOpen]);
+
+  const saveTranslationsSignature = useMemo(
+    () => savableProjects.map((project) => `${project.id}:${project.sourcePath}:${buildEntriesSignature(project.entries)}`).join("|"),
+    [savableProjects]
+  );
+
+  useEffect(() => {
+    if (!saveTranslationsDialogOpen) return;
+    void refreshSaveTranslationsPreview();
+  }, [saveTranslationsDialogOpen, saveTranslationsSignature]);
 
   // Load real source file content (for inspector)
   useEffect(() => {
@@ -1790,16 +1867,162 @@ function dismissUpdateDialog() {
     return () => window.removeEventListener("keydown", handleSaveShortcut);
   }, [viewMode, busy, quickSave]);
 
-  async function saveNps() {
-    if (!entries.length || !sourcePath) return;
+  async function refreshSaveTranslationsPreview() {
+    if (!workspace || !saveTranslationsDialogOpen) return;
+
+    if (!savableProjects.length) {
+      setSaveTranslationsByProject({});
+      setSaveTranslationsSelection({});
+      return;
+    }
+
+    setSaveTranslationsRefreshing(true);
+    setSaveTranslationsProgressState({
+      active: true,
+      stage: "Analyzing output files...",
+      current: 0,
+      total: savableProjects.length,
+    });
+
     try {
-      const outPath = await invoke<string>("save_translated_nps", {
-        sourcePath,
-        entries
+      const next: Record<string, SaveTranslationPreview> = {};
+
+      for (let i = 0; i < savableProjects.length; i += 1) {
+        const project = savableProjects[i];
+        const preview = await invoke<SaveTranslationPreview>("preview_translated_nps", {
+          sourcePath: project.sourcePath,
+          entries: project.entries,
+          outputDir: translationsOutputDir,
+        });
+        next[project.id] = preview;
+
+        setSaveTranslationsProgressState((prev) => ({
+          ...prev,
+          stage: `Analyzing ${preview.file_name} (${i + 1}/${savableProjects.length})`,
+          current: i + 1,
+        }));
+      }
+
+      setSaveTranslationsByProject(next);
+      setSaveTranslationsSelection((prev) => {
+        const out: Record<string, boolean> = {};
+        for (const project of savableProjects) {
+          const existing = prev[project.id];
+          if (typeof existing === "boolean") {
+            out[project.id] = existing;
+          } else {
+            out[project.id] = next[project.id]?.status !== "unchanged";
+          }
+        }
+        return out;
       });
-      setStatus(`Exported ${outPath.split(/[\\/]/).pop()}`);
     } catch (error) {
-      setStatus(`Export failed: ${String(error)}`);
+      setStatus(`Save preview failed: ${String(error)}`);
+    } finally {
+      setSaveTranslationsRefreshing(false);
+      setSaveTranslationsProgressState({
+        active: false,
+        stage: "",
+        current: 0,
+        total: 1,
+      });
+    }
+  }
+
+  function openSaveTranslationsDialog() {
+    if (!workspace || !savableProjects.length || busy) return;
+    setSaveTranslationsDialogOpen(true);
+  }
+
+  function setSaveTranslationsPreset(mode: "all" | "changed" | "new" | "overwrite" | "unchanged" | "none" | "invert") {
+    setSaveTranslationsSelection((prev) => {
+      if (mode === "invert") {
+        const out: Record<string, boolean> = {};
+        for (const row of saveTranslationRows) {
+          out[row.project.id] = !prev[row.project.id];
+        }
+        return out;
+      }
+
+      const out: Record<string, boolean> = {};
+      for (const row of saveTranslationRows) {
+        if (!row.preview) {
+          out[row.project.id] = mode === "all";
+          continue;
+        }
+
+        if (mode === "none") {
+          out[row.project.id] = false;
+        } else if (mode === "all") {
+          out[row.project.id] = true;
+        } else if (mode === "changed") {
+          out[row.project.id] = row.preview.status === "new" || row.preview.status === "overwrite";
+        } else {
+          out[row.project.id] = row.preview.status === mode;
+        }
+      }
+      return out;
+    });
+  }
+
+  async function saveTranslationsWithSelection() {
+    if (!workspace) return;
+    const targets = saveTranslationRows.filter((row) => row.selected);
+    if (!targets.length) {
+      setStatus("Select at least one file to save");
+      return;
+    }
+
+    setSaveTranslationsBusy(true);
+    setSaveTranslationsProgressState({
+      active: true,
+      stage: "Saving translated files...",
+      current: 0,
+      total: targets.length,
+    });
+
+    try {
+      let savedCount = 0;
+      let newCount = 0;
+      let overwriteCount = 0;
+      let unchangedCount = 0;
+
+      for (let i = 0; i < targets.length; i += 1) {
+        const row = targets[i];
+        const outPath = await invoke<string>("save_translated_nps", {
+          sourcePath: row.project.sourcePath,
+          entries: row.project.entries,
+          outputDir: translationsOutputDir,
+        });
+
+        savedCount += 1;
+        const status = row.preview?.status;
+        if (status === "new") newCount += 1;
+        else if (status === "overwrite") overwriteCount += 1;
+        else if (status === "unchanged") unchangedCount += 1;
+
+        const fileName = outPath.split(/[\\/]/).pop() || outPath;
+        setSaveTranslationsProgressState((prev) => ({
+          ...prev,
+          stage: `Saved ${fileName} (${i + 1}/${targets.length})`,
+          current: i + 1,
+        }));
+      }
+
+      setStatus(
+        `Saved ${savedCount} translation files to /translations (new: ${newCount}, overwrite: ${overwriteCount}, unchanged: ${unchangedCount})`
+      );
+      setSaveTranslationsDialogOpen(false);
+    } catch (error) {
+      setStatus(`Save translations failed: ${String(error)}`);
+    } finally {
+      setSaveTranslationsBusy(false);
+      setSaveTranslationsProgressState({
+        active: false,
+        stage: "",
+        current: 0,
+        total: 1,
+      });
     }
   }
 
@@ -2413,7 +2636,7 @@ function dismissUpdateDialog() {
                 <>
                   <div className="project-manager-controls-row">
                     <button className="btn" onClick={openProject} disabled={busy}>{Ico.folder} Add Files</button>
-                    <button className="btn" onClick={quickSave} disabled={!projects.length || busy || dirtyProjectCount === 0}>{Ico.save} Quick Save</button>
+                    <button className="btn" onClick={quickSave} disabled={!projects.length || busy || dirtyProjectCount === 0}>{Ico.save} Quick Save Project</button>
                     <button className="btn" onClick={() => setViewMode("studio")} disabled={busy}>Open Studio</button>
                   </div>
                   <input
@@ -2572,9 +2795,9 @@ function dismissUpdateDialog() {
               </div>
             </div>
 
-            <button className="btn" onClick={quickSave} disabled={!projects.length || busy || dirtyProjectCount === 0}>{Ico.save} Quick Save</button>
-            <button className="btn" onClick={saveNps} disabled={!entries.length || busy}>{Ico.export} Save .nps</button>
-            <button className="btn" onClick={openImportDialog} disabled={!entries.length || busy}>{Ico.import} Import</button>
+            <button className="btn" onClick={quickSave} disabled={!projects.length || busy || dirtyProjectCount === 0}>{Ico.save} Quick Save Project</button>
+            <button className="btn" onClick={openSaveTranslationsDialog} disabled={!savableProjects.length || busy}>{Ico.export} Save Translations</button>
+            <button className="btn" onClick={openImportDialog} disabled={!entries.length || busy}>{Ico.import} Import Translations</button>
             <button className="btn" onClick={openNameManager} disabled={busy}>{Ico.folder} Name Manager</button>
             <button className="btn" onClick={enterReviewMode} disabled={!entries.length || busy}>{Ico.review} Review Mode</button>
             <div className="preset-group">
@@ -2868,11 +3091,122 @@ function dismissUpdateDialog() {
         </>
       )}
 
+      {saveTranslationsDialogOpen && (
+        <div className="modal-overlay" onClick={() => !saveTranslationsBusy && setSaveTranslationsDialogOpen(false)}>
+          <div className="import-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="import-modal-header">
+              <h3>Save Translations</h3>
+              <button
+                className="mini-btn"
+                onClick={() => setSaveTranslationsDialogOpen(false)}
+                disabled={saveTranslationsBusy}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="import-modal-section">
+              <label className="import-modal-label">Output folder (created automatically)</label>
+              <input className="import-path-input" value={translationsOutputDir} readOnly />
+              <div className="save-translations-summary">
+                <span className="import-method-tag">selected: {saveTranslationsCounts.selected}/{saveTranslationRows.length}</span>
+                <span className="import-method-tag">new: {saveTranslationsCounts.new}</span>
+                <span className="import-method-tag">overwrite: {saveTranslationsCounts.overwrite}</span>
+                <span className="import-method-tag">unchanged: {saveTranslationsCounts.unchanged}</span>
+              </div>
+            </div>
+
+            <div className="import-modal-section">
+              <div className="import-section-title">Quick selection</div>
+              <div className="save-translations-presets">
+                <button className="mini-btn" disabled={saveTranslationsBusy} onClick={() => setSaveTranslationsPreset("all")}>All</button>
+                <button className="mini-btn" disabled={saveTranslationsBusy} onClick={() => setSaveTranslationsPreset("changed")}>Only Changed</button>
+                <button className="mini-btn" disabled={saveTranslationsBusy} onClick={() => setSaveTranslationsPreset("new")}>Only New</button>
+                <button className="mini-btn" disabled={saveTranslationsBusy} onClick={() => setSaveTranslationsPreset("overwrite")}>Only Overwrite</button>
+                <button className="mini-btn" disabled={saveTranslationsBusy} onClick={() => setSaveTranslationsPreset("unchanged")}>Only Unchanged</button>
+                <button className="mini-btn" disabled={saveTranslationsBusy} onClick={() => setSaveTranslationsPreset("invert")}>Invert</button>
+                <button className="mini-btn" disabled={saveTranslationsBusy} onClick={() => setSaveTranslationsPreset("none")}>Clear</button>
+              </div>
+            </div>
+
+            <div className="import-modal-section">
+              <div className="import-section-title">Files to save</div>
+              {saveTranslationRows.length === 0 ? (
+                <div className="import-issue-hint">No loaded files are available for export.</div>
+              ) : (
+                <div className="save-translations-list">
+                  {saveTranslationRows.map((row) => {
+                    const status = row.preview?.status || "";
+                    const statusLabel = status === "new"
+                      ? "New File"
+                      : status === "overwrite"
+                        ? "Will Overwrite"
+                        : status === "unchanged"
+                          ? "Unchanged"
+                          : "Analyzing...";
+
+                    return (
+                      <label key={row.project.id} className="save-translations-row">
+                        <input
+                          type="checkbox"
+                          checked={row.selected}
+                          disabled={saveTranslationsBusy}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setSaveTranslationsSelection((prev) => ({ ...prev, [row.project.id]: checked }));
+                          }}
+                        />
+                        <div className="save-translations-main">
+                          <div className="save-translations-title" title={row.project.sourcePath}>{row.projectName}</div>
+                          <div className="save-translations-meta">{row.sourceName}</div>
+                        </div>
+                        <div className={`save-translations-status ${status || "pending"}`}>{statusLabel}</div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {saveTranslationsProgressState.active && (
+              <div className="import-modal-section">
+                <div className="import-section-title">Progress</div>
+                <div className="import-progress-stage">{saveTranslationsProgressState.stage}</div>
+                <div className="import-progress-track">
+                  <div className="import-progress-fill" style={{ width: `${saveTranslationsProgressPercent}%` }} />
+                </div>
+                <div className="import-progress-meta">
+                  {saveTranslationsProgressPercent}% ({saveTranslationsProgressState.current}/{saveTranslationsProgressState.total})
+                </div>
+              </div>
+            )}
+
+            <div className="import-modal-actions">
+              <button
+                className="btn"
+                onClick={() => void refreshSaveTranslationsPreview()}
+                disabled={saveTranslationsBusy || saveTranslationsRefreshing}
+              >
+                {Ico.review} {saveTranslationsRefreshing ? "Refreshing..." : "Refresh Status"}
+              </button>
+              <button className="btn" onClick={() => setSaveTranslationsDialogOpen(false)} disabled={saveTranslationsBusy}>Cancel</button>
+              <button
+                className="btn primary"
+                onClick={() => void saveTranslationsWithSelection()}
+                disabled={saveTranslationsBusy || saveTranslationsCounts.selected === 0}
+              >
+                {Ico.export} {saveTranslationsBusy ? "Saving..." : `Save Selected (${saveTranslationsCounts.selected})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {importDialogOpen && (
         <div className="modal-overlay" onClick={() => !importBusy && setImportDialogOpen(false)}>
           <div className="import-modal" onClick={(e) => e.stopPropagation()}>
             <div className="import-modal-header">
-              <h3>Import Translation</h3>
+              <h3>Import Translations</h3>
               <button className="mini-btn" onClick={() => setImportDialogOpen(false)} disabled={importBusy}>Close</button>
             </div>
 

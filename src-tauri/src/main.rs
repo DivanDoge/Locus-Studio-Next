@@ -61,6 +61,13 @@ struct ImportResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct SaveTranslationPreview {
+    file_name: String,
+    out_path: String,
+    status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct CounterFileReport {
     file: String,
     lines: usize,
@@ -364,6 +371,12 @@ fn build_entries_from_nps(nps_path: &Path) -> Result<Vec<Entry>> {
 }
 
 fn apply_translations_to_nps(source_path: &Path, entries: &[Entry], out_path: &Path) -> Result<()> {
+    let rendered = build_translated_nps_content(source_path, entries)?;
+    fs::write(out_path, rendered)?;
+    Ok(())
+}
+
+fn build_translated_nps_content(source_path: &Path, entries: &[Entry]) -> Result<String> {
     let content = fs::read_to_string(source_path)?;
 
     let mut sorted_entries: Vec<&Entry> = entries.iter().collect();
@@ -399,8 +412,29 @@ fn apply_translations_to_nps(source_path: &Path, entries: &[Entry], out_path: &P
             out.push(apply_entries_to_line(line, &line_entries));
         }
     }
-    fs::write(out_path, out.join("\n"))?;
-    Ok(())
+    Ok(out.join("\n"))
+}
+
+fn normalize_newlines(input: &str) -> String {
+    input.replace("\r\n", "\n")
+}
+
+fn resolve_translations_output_path(source: &Path, output_dir: Option<String>) -> Result<PathBuf, String> {
+    let dir = if let Some(dir) = output_dir {
+        PathBuf::from(dir)
+    } else {
+        source
+            .parent()
+            .map(|p| p.join("translations"))
+            .unwrap_or_else(|| PathBuf::from("translations"))
+    };
+
+    fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let name = source
+        .file_name()
+        .and_then(|n| n.to_str())
+        .ok_or_else(|| "Invalid source file name".to_string())?;
+    Ok(dir.join(name))
 }
 
 fn apply_entries_to_line(line: &str, entries: &[&Entry]) -> String {
@@ -944,13 +978,44 @@ fn quick_save_project(
 }
 
 #[tauri::command]
-fn save_translated_nps(source_path: String, entries: Vec<Entry>) -> Result<String, String> {
+fn preview_translated_nps(
+    source_path: String,
+    entries: Vec<Entry>,
+    output_dir: Option<String>,
+) -> Result<SaveTranslationPreview, String> {
     let source = PathBuf::from(source_path);
-    let name = source
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| "Invalid source file name".to_string())?;
-    let out = source.with_file_name(format!("translated_{name}"));
+    let out = resolve_translations_output_path(&source, output_dir)?;
+    let rendered = build_translated_nps_content(&source, &entries).map_err(|e| e.to_string())?;
+    let status = if out.exists() {
+        let existing = fs::read_to_string(&out).unwrap_or_default();
+        if normalize_newlines(&existing) == normalize_newlines(&rendered) {
+            "unchanged"
+        } else {
+            "overwrite"
+        }
+    } else {
+        "new"
+    };
+
+    Ok(SaveTranslationPreview {
+        file_name: source
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("unknown")
+            .to_string(),
+        out_path: out.to_string_lossy().to_string(),
+        status: status.to_string(),
+    })
+}
+
+#[tauri::command]
+fn save_translated_nps(
+    source_path: String,
+    entries: Vec<Entry>,
+    output_dir: Option<String>,
+) -> Result<String, String> {
+    let source = PathBuf::from(source_path);
+    let out = resolve_translations_output_path(&source, output_dir)?;
     apply_translations_to_nps(&source, &entries, &out).map_err(|e| e.to_string())?;
     Ok(out.to_string_lossy().to_string())
 }
@@ -1116,6 +1181,7 @@ fn main() {
             open_nps_project,
             load_json_project,
             quick_save_project,
+            preview_translated_nps,
             save_translated_nps,
             import_translation_file,
             run_counter,

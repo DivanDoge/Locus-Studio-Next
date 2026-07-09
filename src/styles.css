@@ -1692,6 +1692,94 @@ td.col-type .tag {
   padding: 12px 14px;
 }
 
+.save-translations-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.save-translations-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.save-translations-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  max-height: 38vh;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.save-translations-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg3);
+  padding: 8px 10px;
+}
+
+.save-translations-row input[type=checkbox] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+}
+
+.save-translations-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.save-translations-title {
+  color: var(--fg);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.save-translations-meta {
+  color: var(--fg3);
+  font-size: 10px;
+}
+
+.save-translations-status {
+  border: 1px solid var(--border2);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-size: 10px;
+  color: var(--fg3);
+}
+
+.save-translations-status.new {
+  color: var(--green);
+  border-color: rgba(78, 201, 123, 0.65);
+  background: rgba(78, 201, 123, 0.12);
+}
+
+.save-translations-status.overwrite {
+  color: var(--orange);
+  border-color: rgba(232, 162, 79, 0.65);
+  background: rgba(232, 162, 79, 0.12);
+}
+
+.save-translations-status.unchanged {
+  color: var(--accent2);
+  border-color: rgba(90, 156, 248, 0.65);
+  background: rgba(90, 156, 248, 0.1);
+}
+
+.save-translations-status.pending {
+  color: var(--fg3);
+}
+
 .alias-manager-list {
   display: flex;
   flex-direction: column;
@@ -1754,6 +1842,15 @@ td.col-type .tag {
   .import-modal-actions .btn {
     flex: 1;
     justify-content: center;
+  }
+
+  .save-translations-row {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .save-translations-status {
+    grid-column: 1 / -1;
+    justify-self: flex-start;
   }
 
   .alias-row {
