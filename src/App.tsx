@@ -520,6 +520,24 @@ function replaceFirstOccurrence(input: string, search: string, replacement: stri
   return input.slice(0, idx) + replacement + input.slice(idx + search.length);
 }
 
+const QUOTE_PAIRS: Array<{ open: string; close: string }> = [
+  { open: "\"", close: "\"" },
+  { open: "«", close: "»" },
+  { open: "“", close: "”" },
+  { open: "„", close: "“" },
+  { open: "'", close: "'" },
+  { open: "(", close: ")" },
+  { open: "[", close: "]" },
+  { open: "{", close: "}" },
+  { open: "<", close: ">" },
+  { open: "「", close: "」" },
+  { open: "『", close: "』" },
+];
+
+function findPair(openChar: string, closeChar: string) {
+  return QUOTE_PAIRS.find((pair) => pair.open === openChar && pair.close === closeChar) ?? null;
+}
+
 function App() {
   const isSplashWindow = useMemo(() => {
     if (typeof window === "undefined") return false;
@@ -637,6 +655,7 @@ function App() {
   const [appVersion, setAppVersion] = useState("");
   const updateCheckInFlightRef = useRef(false);
   const gridContainerRef = useRef<HTMLDivElement>(null);
+  const translationTextareaRef = useRef<HTMLTextAreaElement>(null);
   const gridRows = 30;
   const rowHeight = useMemo(() => {
     const usableHeight = Math.max(360, gridHeight - 12);
@@ -2426,15 +2445,51 @@ function dismissUpdateDialog() {
     }
   }
 
-  async function translitCurrent() {
-    if (!currentEntry) return;
-    const text = await invoke<string>("transliterate_text", { text: currentEntry.original });
-    updateCurrentTranslation(text);
-  }
-
   function updateCurrentTranslation(next: string) {
     if (currentId === null) return;
     setEntries((prev) => prev.map((e) => (e.id === currentId ? { ...e, translation: next } : e)));
+  }
+
+  function wrapSelectedTranslation(openBracket: string, closeBracket: string) {
+    if (!currentEntry) return;
+    const textarea = translationTextareaRef.current;
+    if (!textarea) return;
+
+    const value = currentEntry.translation ?? "";
+    const selectionStart = textarea.selectionStart ?? 0;
+    const selectionEnd = textarea.selectionEnd ?? selectionStart;
+    if (selectionStart === selectionEnd) return;
+
+    let replaceStart = selectionStart;
+    let replaceEnd = selectionEnd;
+
+    if (replaceStart > 0 && replaceEnd < value.length) {
+      const outsidePair = findPair(value[replaceStart - 1], value[replaceEnd]);
+      if (outsidePair) {
+        replaceStart -= 1;
+        replaceEnd += 1;
+      }
+    }
+
+    let core = value.slice(replaceStart, replaceEnd);
+    while (core.length >= 2) {
+      const insidePair = findPair(core[0], core[core.length - 1]);
+      if (!insidePair) break;
+      core = core.slice(1, -1);
+    }
+
+    const nextValue = value.slice(0, replaceStart) + openBracket + core + closeBracket + value.slice(replaceEnd);
+    const nextSelectionStart = replaceStart + openBracket.length;
+    const nextSelectionEnd = nextSelectionStart + core.length;
+
+    updateCurrentTranslation(nextValue);
+
+    requestAnimationFrame(() => {
+      const el = translationTextareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(nextSelectionStart, nextSelectionEnd);
+    });
   }
 
   function getSpeakerName(entry: Entry) {
@@ -3000,12 +3055,30 @@ function dismissUpdateDialog() {
                       <div className="editor-col-header">
                         <span className="editor-col-label">Translation</span>
                         <div className="editor-col-actions">
-                          <button className="mini-btn" disabled={!currentEntry} onClick={translitCurrent}>{Ico.translit} Translit</button>
+                          <button
+                            className="mini-btn"
+                            disabled={!currentEntry}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => wrapSelectedTranslation("\"", "\"")}
+                            title='Wrap selected text in quotation marks ""'
+                          >
+                            ↓ ""
+                          </button>
+                          <button
+                            className="mini-btn"
+                            disabled={!currentEntry}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => wrapSelectedTranslation("«", "»")}
+                            title="Wrap selected text in quotation marks  «»"
+                          >
+                            ↓ «»
+                          </button>
                           <button className="mini-btn" disabled={!currentEntry} onClick={() => navigator.clipboard.writeText(currentEntry?.translation ?? "")}>{Ico.copy} Copy</button>
                         </div>
                       </div>
                       <div className="ta-wrap">
                         <textarea
+                          ref={translationTextareaRef}
                           className="editor-textarea"
                           value={currentEntry?.translation ?? ""}
                           onChange={(e) => updateCurrentTranslation(e.target.value)}
