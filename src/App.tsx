@@ -566,6 +566,8 @@ function App() {
   const [status, setStatus] = useState("Open or create a project folder to begin");
   const [fileListSearch, setFileListSearch] = useState("");
   const [busy, setBusy] = useState(false);
+  const [globalSearchMode, setGlobalSearchMode] = useState(false);
+  const [globalSearchQuery, setGlobalSearchQuery] = useState("");
   const [projectLoadState, setProjectLoadState] = useState<{
     active: boolean;
     stage: string;
@@ -1008,6 +1010,28 @@ function App() {
   const setSearch = useCallback((value: string) => {
     updateActiveProject((project) => ({ ...project, search: value }));
   }, [updateActiveProject]);
+
+  const openEntry = useCallback((projectId: string, entryId: number) => {
+    setProjects((prev) => prev.map((p) => (p.id === projectId ? { ...p, currentId: entryId } : p)));
+    setActiveProjectId(projectId);
+    setViewMode("studio");
+  }, [setViewMode]);
+
+  const globalSearchResults = useMemo(() => {
+    const q = globalSearchQuery.trim().toLowerCase();
+    if (!q) return [] as Array<{ projectId: string; projectName: string; entry: Entry }>;
+    const out: Array<{ projectId: string; projectName: string; entry: Entry }> = [];
+    for (const project of projects) {
+      for (const entry of project.entries) {
+        const orig = (entry.original || "").toLowerCase();
+        const trans = (entry.translation || "").toLowerCase();
+        if (orig.includes(q) || trans.includes(q)) {
+          out.push({ projectId: project.id, projectName: project.name, entry });
+        }
+      }
+    }
+    return out;
+  }, [projects, globalSearchQuery]);
 
   const setFilter = useCallback((value: FilterMode) => {
     updateActiveProject((project) => ({ ...project, filter: value }));
@@ -2914,19 +2938,68 @@ function dismissUpdateDialog() {
           {/* Search bar */}
           <div id="searchbar">
             <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search speaker, original, translation..."
+              value={globalSearchMode ? globalSearchQuery : search}
+              onChange={(e) => (globalSearchMode ? setGlobalSearchQuery(e.target.value) : setSearch(e.target.value))}
+              placeholder="Search original or translation..."
             />
-            {(["all", "todo", "done", "voice", "narration", "choice"] as const).map((mode) => (
-              <button
-                key={mode}
-                className={`filter-btn${filter === mode ? " active" : ""}`}
-                onClick={() => setFilter(mode)}
-              >
-                {mode}
-              </button>
-            ))}
+            <button
+              className={`filter-btn global-search-btn${globalSearchMode ? " active" : ""}`}
+              onClick={() => {
+                const next = !globalSearchMode;
+                setGlobalSearchMode(next);
+                if (!next) setGlobalSearchQuery("");
+              }}
+              title={globalSearchMode ? "Searching across all opened files" : "Searching only current file"}
+              style={{ marginLeft: 8 }}
+            >
+              {globalSearchMode ? "All files" : "Current file"}
+            </button>
+            <div style={{ display: "flex", alignItems: "center", marginLeft: "auto" }}>
+              <div style={{ width: 1, height: 28, background: "rgba(255,255,255,0.12)", marginRight: 12 }} />
+              <div style={{ display: "flex", gap: 10, alignItems: "center", background: "rgba(255,255,255,0.03)", padding: "6px 8px", borderRadius: 10 }}>
+                {["all", "todo", "done", "voice", "narration", "choice"].map((mode) => (
+                  <button
+                    key={mode}
+                    className={`filter-btn${filter === mode ? " active" : ""}`}
+                    onClick={() => setFilter(mode as any)}
+                  >
+                    {mode}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {globalSearchMode && globalSearchQuery.trim() !== "" && (
+              <div className="global-search-results" style={{ maxHeight: 300, overflow: "auto", marginTop: 8 }}>
+                {globalSearchResults.length === 0 ? (
+                  <div className="global-search-empty">No matches</div>
+                ) : (
+                  (() => {
+                    const grouped = new Map<string, { projectName: string; items: Entry[] }>();
+                    for (const r of globalSearchResults) {
+                      const g = grouped.get(r.projectId) || { projectName: r.projectName, items: [] };
+                      g.items.push(r.entry);
+                      grouped.set(r.projectId, g);
+                    }
+                    return Array.from(grouped.entries()).map(([projectId, group]) => (
+                      <div key={projectId} className="global-search-project">
+                        <div className="global-search-project-header">{group.projectName} <span className="global-search-count">({group.items.length})</span></div>
+                        {group.items.map((entry) => (
+                          <div
+                            key={`${projectId}-${entry.id}`}
+                            className="global-search-item"
+                            onClick={() => openEntry(projectId, entry.id)}
+                          >
+                            <div className="global-search-item-original">{entry.original}</div>
+                            <div className="global-search-item-translation">{entry.translation}</div>
+                          </div>
+                        ))}
+                      </div>
+                    ));
+                  })()
+                )}
+              </div>
+            )}
           </div>
 
           <div className="grid-layout-container" ref={gridContainerRef}>
