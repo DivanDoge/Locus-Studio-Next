@@ -545,6 +545,7 @@ function App() {
   }, []);
   const [updateInfo, setUpdateInfo] = useState<Update | null>(null);
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const [updateDownloading, setUpdateDownloading] = useState(false);
   const [updateProgress, setUpdateProgress] = useState({ downloaded: 0, total: 0 });
   const [updateReadyToRestart, setUpdateReadyToRestart] = useState(false);
@@ -655,7 +656,9 @@ function App() {
   const [reviewCurrentId, setReviewCurrentId] = useState<number | null>(null);
   const [reviewFilter, setReviewFilter] = useState<"all" | "modified" | "unedited">("all");
   const [appVersion, setAppVersion] = useState("");
+  const [isWindowMaximized, setIsWindowMaximized] = useState(false);
   const updateCheckInFlightRef = useRef(false);
+  const ignoreCloseGuardRef = useRef(false);
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const translationTextareaRef = useRef<HTMLTextAreaElement>(null);
   const gridRows = 30;
@@ -1840,12 +1843,18 @@ function dismissUpdateDialog() {
   }
 
   const dirtyProjectCount = useMemo(
-    () => projects.filter((project) => buildEntriesSignature(project.entries) !== project.savedSignature).length,
+    () => projects.filter((project) => {
+      const signature = buildEntriesSignature(project.entries);
+      if (!project.savedSignature) {
+        return signature.length > 0;
+      }
+      return signature !== project.savedSignature;
+    }).length,
     [projects]
   );
 
-  async function quickSave() {
-    if (!projects.length) return;
+  async function quickSave(): Promise<boolean> {
+    if (!projects.length) return false;
 
     const dirtyProjects = projects.filter(
       (project) => buildEntriesSignature(project.entries) !== project.savedSignature
@@ -1853,7 +1862,7 @@ function dismissUpdateDialog() {
 
     if (!dirtyProjects.length) {
       setStatus("No unsaved changes to save");
-      return;
+      return false;
     }
 
     setBusy(true);
@@ -1890,12 +1899,123 @@ function dismissUpdateDialog() {
           ? `Saved ${updates.get(dirtyProjects[0].id)?.path.split(/[\\/]/).pop()}`
           : `Saved ${dirtyProjects.length} modified files`
       );
+      return true;
     } catch (error) {
       setStatus(`Save failed: ${String(error)}`);
+      return false;
     } finally {
       setBusy(false);
     }
   }
+
+  const closeAppWindow = useCallback(async () => {
+    const appWindow = getCurrentWindow();
+    ignoreCloseGuardRef.current = true;
+
+    try {
+      await appWindow.close();
+    } catch (error) {
+      console.error("Failed to close app window via close():", error);
+      try {
+        await appWindow.destroy();
+      } catch (destroyError) {
+        console.error("Failed to destroy app window after close fallback:", destroyError);
+        ignoreCloseGuardRef.current = false;
+      }
+    }
+  }, []);
+
+  const requestAppClose = useCallback(() => {
+    if (dirtyProjectCount === 0) {
+      setCloseConfirmOpen(false);
+      void closeAppWindow();
+      return;
+    }
+
+    setCloseConfirmOpen(true);
+  }, [closeAppWindow, dirtyProjectCount]);
+
+  const syncWindowMaximizedState = useCallback(async () => {
+    try {
+      const appWindow = getCurrentWindow();
+      setIsWindowMaximized(await appWindow.isMaximized());
+    } catch {
+      setIsWindowMaximized(false);
+    }
+  }, []);
+
+  const minimizeAppWindow = useCallback(async () => {
+    await getCurrentWindow().minimize();
+  }, []);
+
+  const toggleMaximizeWindow = useCallback(async () => {
+    const appWindow = getCurrentWindow();
+    await appWindow.toggleMaximize();
+    await syncWindowMaximizedState();
+  }, [syncWindowMaximizedState]);
+
+  useEffect(() => {
+    void syncWindowMaximizedState();
+
+    const appWindow = getCurrentWindow();
+    const unlisten = appWindow.onResized(() => {
+      void syncWindowMaximizedState();
+    });
+
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, [syncWindowMaximizedState]);
+
+  async function saveAndCloseApp() {
+    if (busy) return;
+    const saved = await quickSave();
+    if (!saved) {
+      setStatus("Unable to save before closing. Choose Close without Saving or Cancel.");
+      return;
+    }
+    setCloseConfirmOpen(false);
+    await closeAppWindow();
+  }
+
+  async function discardAndCloseApp() {
+    setCloseConfirmOpen(false);
+    await closeAppWindow();
+  }
+
+  useEffect(() => {
+    if (isSplashWindow) return;
+
+    let unlisten: (() => void) | undefined;
+
+    const setupCloseListener = async () => {
+      const appWindow = getCurrentWindow();
+      unlisten = await appWindow.onCloseRequested((event) => {
+        if (ignoreCloseGuardRef.current) {
+          ignoreCloseGuardRef.current = false;
+          return;
+        }
+
+        event.preventDefault();
+
+        if (dirtyProjectCount === 0) {
+          setCloseConfirmOpen(false);
+          void closeAppWindow();
+          return;
+        }
+
+        if (!closeConfirmOpen) {
+          setCloseConfirmOpen(true);
+        }
+      });
+    };
+
+    void setupCloseListener();
+
+    return () => {
+      unlisten?.();
+    };
+  }, [closeAppWindow, closeConfirmOpen, dirtyProjectCount, isSplashWindow]);
 
   useEffect(() => {
     const handleSaveShortcut = (e: KeyboardEvent) => {
@@ -1909,6 +2029,17 @@ function dismissUpdateDialog() {
     window.addEventListener("keydown", handleSaveShortcut);
     return () => window.removeEventListener("keydown", handleSaveShortcut);
   }, [viewMode, busy, quickSave]);
+
+  useEffect(() => {
+    if (!projects.length || viewMode !== "studio") return;
+
+    const timer = window.setInterval(() => {
+      if (busy) return;
+      void quickSave();
+    }, 3 * 60 * 1000);
+
+    return () => window.clearInterval(timer);
+  }, [projects, viewMode, busy, quickSave]);
 
   async function refreshSaveTranslationsPreview() {
     if (!workspace || !saveTranslationsDialogOpen) return;
@@ -2521,6 +2652,31 @@ function dismissUpdateDialog() {
     return aliases[entry.speaker] || entry.speaker;
   }
 
+  function getSpeakerTextColor(speakerName: string) {
+    const normalized = speakerName.toLowerCase();
+    if (normalized === "narrator" || normalized === "narration") {
+      return "#f3ba7a";
+    }
+
+    const palette = [
+      "#7aa8ff",
+      "#76d9c3",
+      "#c89dff",
+      "#7ec8ff",
+      "#f19ad4",
+      "#8fe19c",
+      "#f0d46d",
+      "#8ab4ff"
+    ];
+
+    let hash = 0;
+    for (let i = 0; i < speakerName.length; i += 1) {
+      hash = (hash * 31 + speakerName.charCodeAt(i)) >>> 0;
+    }
+
+    return palette[hash % palette.length];
+  }
+
   function openNameManager() {
     setAliasDraft({ ...aliases });
     setNameManagerOpen(true);
@@ -2612,7 +2768,67 @@ function dismissUpdateDialog() {
   };
 
   return (
-    <div className="app" onDragOver={handleDragOver} onDrop={handleDrop}>
+    <div className="app-shell">
+      {!isSplashWindow && (
+        <div className="window-frame" data-tauri-drag-region>
+          <div className="window-frame-brand" aria-label="Locus Studio Next">
+            <img className="window-frame-logo" src="/Locus-logo.png" alt="Locus logo" />
+          </div>
+          <div className="window-frame-controls">
+            <button
+              type="button"
+              className="window-control minimize"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onClick={() => void minimizeAppWindow()}
+              title="Minimize"
+              aria-label="Minimize window"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
+            </button>
+            <button
+              type="button"
+              className="window-control maximize"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onClick={() => void toggleMaximizeWindow()}
+              title={isWindowMaximized ? "Restore" : "Maximize"}
+              aria-label={isWindowMaximized ? "Restore window" : "Maximize window"}
+            >
+              {isWindowMaximized ? (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8 8h8v8H8z" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M4 12V6a2 2 0 0 1 2-2h6" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M20 12v6a2 2 0 0 1-2 2h-6" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M7 7h10v10H7z" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              )}
+            </button>
+            <button
+              type="button"
+              className="window-control close"
+              onPointerDown={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+              }}
+              onClick={requestAppClose}
+              title="Close"
+              aria-label="Close window"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7L7 17" /></svg>
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="app" onDragOver={handleDragOver} onDrop={handleDrop}>
       {/* Drag overlay */}
       <div id="drag-overlay" className={isDragOver ? "active" : ""}>
         <div style={{ textAlign: "center" }}>
@@ -3058,12 +3274,16 @@ function dismissUpdateDialog() {
                           {filteredEntries.map((e) => {
                             const sel = e.id === currentId;
                             const done = !!e.translation;
+                            const approved = !!e.approved;
+                            const speakerName = getSpeakerName(e);
                             const rowClass = [
                               sel ? "selected" : "",
                               done ? "row-done" : "",
+                              approved ? "row-approved" : "",
                               e.type === "narration" ? "row-narr" : "",
                               e.type === "choice" ? "row-choice" : "",
                             ].filter(Boolean).join(" ");
+                            const speakerTextColor = getSpeakerTextColor(speakerName);
                             return (
                               <tr
                                 key={e.id}
@@ -3072,9 +3292,9 @@ function dismissUpdateDialog() {
                                 onClick={() => setCurrentId(e.id)}
                               >
                                 <td className="col-id">{e.id}</td>
-                                <td className="col-spk">{getSpeakerName(e)}</td>
-                                <td className="col-orig">{e.original}</td>
-                                <td className="col-tr">{e.translation}</td>
+                                <td className="col-spk" style={{ color: speakerTextColor }}>{getSpeakerName(e)}</td>
+                                <td className="col-orig" style={{ color: speakerTextColor }}>{e.original}</td>
+                                <td className="col-tr" style={{ color: speakerTextColor }}>{e.translation}</td>
                                 <td className="col-type"><span className={`tag tag-${e.type}`}>{e.type}</span></td>
                                 <td className="col-line">{e.line_no}</td>
                               </tr>
@@ -3845,6 +4065,35 @@ function dismissUpdateDialog() {
           </div>
         </div>
       )}
+      {closeConfirmOpen && (
+        <div className="modal-overlay" onClick={() => setCloseConfirmOpen(false)}>
+          <div className="import-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="import-modal-header">
+              <h3>Unsaved changes</h3>
+              <button className="mini-btn" onClick={() => setCloseConfirmOpen(false)} disabled={busy}>Close</button>
+            </div>
+
+            <div className="import-modal-section">
+              <div className="import-issue-hint">
+                You have {dirtyProjectCount} unsaved file{dirtyProjectCount === 1 ? "" : "s"}. What would you like to do before exiting?
+              </div>
+            </div>
+
+            <div className="import-modal-actions">
+              <button className="btn primary" onClick={() => void saveAndCloseApp()} disabled={busy}>
+                Save & Close
+              </button>
+              <button className="btn" onClick={() => discardAndCloseApp()} disabled={busy}>
+                Close without Saving
+              </button>
+              <button className="btn" onClick={() => setCloseConfirmOpen(false)} disabled={busy}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {updateDialogOpen && updateInfo && (
         <div className="modal-overlay" onClick={() => !updateDownloading && dismissUpdateDialog()}>
           <div className="import-modal" onClick={(e) => e.stopPropagation()}>
@@ -3899,6 +4148,7 @@ function dismissUpdateDialog() {
           </div>
         </div>
       )}
+      </div>
     </div>
   );
 }

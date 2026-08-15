@@ -36,15 +36,119 @@ html, body {
 }
 
 /* -- APP SHELL -- */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  width: 100vw;
+  height: 100vh;
+  background: var(--bg);
+}
+
+.window-frame {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  padding: 0 8px 0 10px;
+  background: rgba(18, 18, 25, 0.94);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  -webkit-app-region: drag;
+  position: relative;
+  z-index: 30;
+}
+
+.window-frame-brand {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding-left: 2px;
+  -webkit-app-region: drag;
+}
+
+.window-frame-logo {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  display: block;
+  pointer-events: none;
+  opacity: 0.92;
+}
+
+.window-frame-controls {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+  pointer-events: auto;
+  position: relative;
+  z-index: 31;
+}
+
+.window-control {
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg2);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  padding: 0;
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+  touch-action: manipulation;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
+}
+
+.window-control svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+  display: block;
+  pointer-events: none;
+  shape-rendering: geometricPrecision;
+  vector-effect: non-scaling-stroke;
+}
+
+.window-control:focus-visible {
+  outline: 1px solid rgba(137, 221, 255, 0.9);
+  outline-offset: 2px;
+}
+
+.window-control:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--fg);
+}
+
+.window-control:active {
+  transform: scale(0.98);
+}
+
+.window-control.close {
+  color: var(--fg2);
+}
+
+.window-control.close:hover {
+  background: rgba(240, 113, 120, 0.14);
+  color: #ffdfe2;
+}
+
 .app {
   display: flex;
   flex-direction: row;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: calc(100vh - 34px);
+  flex: 1;
   overflow: hidden;
-  position: fixed;
-  top: 0;
-  left: 0;
+  position: relative;
 }
 
 .app.splash-window-only {
@@ -359,7 +463,7 @@ html, body {
 .project-file-progress-fill {
   height: 100%;
   border-radius: 99px;
-  background: linear-gradient(90deg, #2dc26b, #2dbfa0);
+  background: linear-gradient(90deg, #4ea1ff, #2f6eea);
 }
 
 #toolbar-title {
@@ -830,11 +934,11 @@ html, body {
 }
 
 .project-manager-progress-fill.translation {
-  background: linear-gradient(90deg, #2dc26b, #2dbfa0);
+  background: linear-gradient(90deg, #5aa7ff, #2f6eea);
 }
 
 .project-manager-progress-fill.approved {
-  background: linear-gradient(90deg, #5a9cf8, #7c6af7);
+  background: linear-gradient(90deg, #46d98d, #22a75d);
 }
 
 .project-manager-item-main {
@@ -1145,7 +1249,14 @@ tbody tr {
 tbody tr:nth-child(even) { background: var(--bg2); }
 tbody tr:nth-child(odd)  { background: var(--bg); }
 tbody tr:hover           { background: var(--bg3); }
-tbody tr.selected        { background: var(--sel) !important; }
+tbody tr.selected {
+  background: rgba(124, 106, 247, 0.20) !important;
+}
+
+tbody tr.selected td {
+  background: rgba(124, 106, 247, 0.20);
+  box-shadow: none;
+}
 
 td {
   padding: 5px 8px;
@@ -1179,9 +1290,19 @@ td.col-type .tag {
 .tag-narration { background: rgba(232,162,79,0.2);  color: var(--orange); }
 .tag-choice    { background: rgba(137,221,255,0.2); color: var(--cyan); }
 
-.row-done   td             { color: var(--green); }
-.row-narr   td.col-spk     { color: var(--orange); }
-.row-choice td.col-spk     { color: var(--cyan); }
+.row-done td {
+  background: rgba(69, 132, 255, 0.10);
+  color: var(--fg);
+}
+.row-approved td {
+  background: rgba(52, 196, 110, 0.10);
+  color: var(--fg);
+}
+tbody tr.row-done.row-approved td {
+  background: rgba(52, 196, 110, 0.12);
+}
+.row-narr td.col-spk { color: var(--orange); }
+.row-choice td.col-spk { color: var(--cyan); }
 
 /* -- EMPTY STATE -- */
 #empty-state {
@@ -2212,11 +2333,11 @@ td.col-type .tag {
 .review-list-item.active.modified { border-left-color: var(--accent); }
 .review-list-item.approved {
   border-left-color: var(--green);
-  background: rgba(78, 201, 123, 0.12);
+  background: rgba(46, 204, 113, 0.12);
 }
 .review-list-item.active.approved {
   border-left-color: var(--green);
-  background: rgba(78, 201, 123, 0.2);
+  background: rgba(46, 204, 113, 0.2);
 }
 
 .review-list-item-header {
