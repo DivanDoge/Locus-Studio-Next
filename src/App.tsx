@@ -661,6 +661,7 @@ function App() {
   const ignoreCloseGuardRef = useRef(false);
   const gridContainerRef = useRef<HTMLDivElement>(null);
   const translationTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const reviewTextareaRef = useRef<HTMLTextAreaElement>(null);
   const gridRows = 30;
   const rowHeight = useMemo(() => {
     const usableHeight = Math.max(360, gridHeight - 12);
@@ -2647,6 +2648,48 @@ function dismissUpdateDialog() {
     });
   }
 
+  function wrapSelectedReviewTranslation(openBracket: string, closeBracket: string) {
+    if (!reviewCurrentEntry) return;
+    const textarea = reviewTextareaRef.current;
+    if (!textarea) return;
+
+    const value = reviewDrafts[reviewCurrentEntry.id] ?? reviewCurrentEntry.translation;
+    const selectionStart = textarea.selectionStart ?? 0;
+    const selectionEnd = textarea.selectionEnd ?? selectionStart;
+    if (selectionStart === selectionEnd) return;
+
+    let replaceStart = selectionStart;
+    let replaceEnd = selectionEnd;
+
+    if (replaceStart > 0 && replaceEnd < value.length) {
+      const outsidePair = findPair(value[replaceStart - 1], value[replaceEnd]);
+      if (outsidePair) {
+        replaceStart -= 1;
+        replaceEnd += 1;
+      }
+    }
+
+    let core = value.slice(replaceStart, replaceEnd);
+    while (core.length >= 2) {
+      const insidePair = findPair(core[0], core[core.length - 1]);
+      if (!insidePair) break;
+      core = core.slice(1, -1);
+    }
+
+    const nextValue = value.slice(0, replaceStart) + openBracket + core + closeBracket + value.slice(replaceEnd);
+    const nextSelectionStart = replaceStart + openBracket.length;
+    const nextSelectionEnd = nextSelectionStart + core.length;
+
+    setReviewDrafts((prev) => ({ ...prev, [reviewCurrentEntry.id]: nextValue }));
+
+    requestAnimationFrame(() => {
+      const el = reviewTextareaRef.current;
+      if (!el) return;
+      el.focus();
+      el.setSelectionRange(nextSelectionStart, nextSelectionEnd);
+    });
+  }
+
   function getSpeakerName(entry: Entry) {
     if (!entry.speaker) return "narrator";
     return aliases[entry.speaker] || entry.speaker;
@@ -3081,7 +3124,14 @@ function dismissUpdateDialog() {
                           ✕
                         </button>
                         <div className="project-file-progress-track">
-                          <div className="project-file-progress-fill" style={{ width: `${fileRow.percent}%` }} />
+                          <div
+                            className="project-file-progress-fill approved"
+                            style={{ width: `${fileRow.approvedPercent}%` }}
+                          />
+                          <div
+                            className="project-file-progress-fill translated"
+                            style={{ width: `${Math.max(0, fileRow.percent - fileRow.approvedPercent)}%` }}
+                          />
                         </div>
                       </div>
                     );
@@ -3973,6 +4023,22 @@ function dismissUpdateDialog() {
                       <div className="review-panel-header">
                         <span className="review-panel-label review-panel-label-edit">Edited</span>
                         <div style={{ display: "flex", gap: 4 }}>
+                          <button
+                            className="mini-btn"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => wrapSelectedReviewTranslation("\"", "\"")}
+                            title='Wrap selected text in quotation marks ""'
+                          >
+                            ↓ ""
+                          </button>
+                          <button
+                            className="mini-btn"
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => wrapSelectedReviewTranslation("«", "»")}
+                            title="Wrap selected text in quotation marks «»"
+                          >
+                            ↓ «»
+                          </button>
                           {(reviewDrafts[reviewCurrentEntry.id] ?? reviewCurrentEntry.translation) !== reviewCurrentEntry.translation && (
                             <button
                               className="mini-btn"
@@ -3984,6 +4050,7 @@ function dismissUpdateDialog() {
                         </div>
                       </div>
                       <textarea
+                        ref={reviewTextareaRef}
                         className="review-textarea review-textarea-edit"
                         value={reviewDrafts[reviewCurrentEntry.id] ?? reviewCurrentEntry.translation}
                         onChange={(e) => setReviewDrafts((prev) => ({ ...prev, [reviewCurrentEntry.id]: e.target.value }))}
